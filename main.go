@@ -401,6 +401,7 @@ type XMLTagFilter struct {
 	inSubTag      bool
 	currentSubTag string
 	inDiffTag     bool            // Whether inside a diff tag
+	inContentTag  bool            // Whether inside a content tag
 	pendingBuffer strings.Builder // Buffer for storing potential tag start sequences
 }
 
@@ -415,6 +416,7 @@ func newXMLTagFilter() *XMLTagFilter {
 		inSubTag:      false,
 		currentSubTag: "",
 		inDiffTag:     false,
+		inContentTag:  false,
 		pendingBuffer: strings.Builder{},
 	}
 }
@@ -432,46 +434,21 @@ func (f *XMLTagFilter) processChunk(chunk string) string {
 	for i := 0; i < len(chunk); i++ {
 		c := chunk[i]
 
-		// If inside a diff tag, output all content directly
-		if f.inDiffTag {
-			// Check if this might be the start of a </diff> closing tag
-			if c == '<' {
-				// If not enough characters left to determine if it's a </diff> tag, store in pendingBuffer
-				if i+6 >= len(chunk) {
-					f.pendingBuffer.WriteString(chunk[i:])
-					break
-				}
-
-				// Check if it's a </diff> closing tag
-				if chunk[i:i+7] == "</diff>" {
-					// Don't output the </diff> tag
-					f.inDiffTag = false
-					i += 6 // Skip processed characters
-					continue
-				}
-			}
-			// Inside diff tag, output character directly
-			f.buffer.WriteByte(c)
+		// Handle special tags (diff, content) that don't filter their content
+		if processed, newIndex := f.handleSpecialTags(chunk, i); processed {
+			i = newIndex
 			continue
 		}
 
-		// Check if this might be the start of a <diff> opening tag
+		// Handle tag start
 		if c == '<' {
-			// If not enough characters left to determine if it's a <diff> tag, store in pendingBuffer
-			if i+5 >= len(chunk) {
-				f.pendingBuffer.WriteString(chunk[i:])
-				break
-			}
-
-			// Check if it's a <diff> opening tag
-			if chunk[i:i+6] == "<diff>" {
-				// Don't output the <diff> tag
-				f.inDiffTag = true
-				i += 5 // Skip processed characters
+			// Check for special tag openings
+			if processed, newIndex := f.handleSpecialTagOpening(chunk, i); processed {
+				i = newIndex
 				continue
 			}
 
-			// Not a <diff> tag, process normally
+			// Not a special tag, process normally
 			f.collectingTag = true
 			f.currentTag.Reset()
 			continue
@@ -482,71 +459,8 @@ func (f *XMLTagFilter) processChunk(chunk string) string {
 			f.collectingTag = false
 			tag := f.currentTag.String()
 
-			// Check if it's a closing tag
-			if strings.HasPrefix(tag, "/") {
-				tagName := tag[1:] // Remove the leading '/'
-
-				// Check if we're closing a tag in our stack
-				if len(f.tagStack) > 0 && f.tagStack[len(f.tagStack)-1] == tagName {
-					// Pop the tag from stack
-					f.tagStack = f.tagStack[:len(f.tagStack)-1]
-
-					// If we're closing the root tool tag, exit tool tag mode
-					if len(f.tagStack) == 0 && isToolTag(tagName) {
-						f.inToolTag = false
-						f.inSubTag = false
-						f.currentSubTag = ""
-					} else if f.inToolTag && len(f.tagStack) == 1 {
-						// We're closing a sub-tag inside a tool tag
-
-						// Reset color before closing the sub-tag
-						f.buffer.WriteString(core.ColorReset)
-
-						f.inSubTag = false
-						f.currentSubTag = ""
-
-						// Add a newline after the sub-tag content for better formatting
-						f.buffer.WriteByte('\n')
-					}
-				}
-			} else {
-				// It's an opening tag
-
-				// If it's a root tool tag, enter tool tag mode but don't output the tag
-				if len(f.tagStack) == 0 && isToolTag(tag) {
-					f.inToolTag = true
-				} else if f.inToolTag && len(f.tagStack) == 1 {
-					// It's a sub-tag inside a tool tag
-					f.inSubTag = true
-					f.currentSubTag = tag
-
-					// Skip requires_approval tag
-					if isHiddenTag(tag) {
-						// Don't show this tag or its content
-						continue
-					}
-
-					// Add prefix based on tool name and tag type
-					f.buffer.WriteString(toolTagPrefix(f.tagStack[0], tag))
-
-					// Apply color based on sub-tag type
-					if tag == "path" {
-						f.buffer.WriteString(core.ColorGreen)
-					} else if tag == "command" {
-						f.buffer.WriteString(core.ColorYellow)
-					} else if tag == "content" {
-						//f.buffer.WriteString(core.ColorBlue)
-					}
-				} else if !f.inToolTag {
-					// For tags outside tool tags, output the tag
-					f.buffer.WriteByte('<')
-					f.buffer.WriteString(tag)
-					f.buffer.WriteByte('>')
-				}
-
-				// Push the tag to stack
-				f.tagStack = append(f.tagStack, tag)
-			}
+			// Process the tag
+			f.processTag(tag)
 			continue
 		}
 
@@ -565,6 +479,172 @@ func (f *XMLTagFilter) processChunk(chunk string) string {
 	}
 
 	return f.buffer.String()
+}
+
+// Handle special tags like diff and content that don't filter their content
+func (f *XMLTagFilter) handleSpecialTags(chunk string, index int) (bool, int) {
+	// If inside a diff tag
+	if f.inDiffTag {
+		return f.handleDiffTagContent(chunk, index)
+	}
+
+	// If inside a content tag
+	if f.inContentTag {
+		return f.handleContentTagContent(chunk, index)
+	}
+
+	return false, index
+}
+
+// Handle content inside diff tags
+func (f *XMLTagFilter) handleDiffTagContent(chunk string, index int) (bool, int) {
+	c := chunk[index]
+
+	// Check if this might be the start of a </diff> closing tag
+	if c == '<' {
+		// If not enough characters left to determine if it's a </diff> tag, store in pendingBuffer
+		if index+6 >= len(chunk) {
+			f.pendingBuffer.WriteString(chunk[index:])
+			return true, len(chunk)
+		}
+
+		// Check if it's a </diff> closing tag
+		if chunk[index:index+7] == "</diff>" {
+			// Don't output the </diff> tag
+			f.inDiffTag = false
+			return true, index + 6
+		}
+	}
+
+	// Inside diff tag, output character directly
+	f.buffer.WriteByte(c)
+	return true, index
+}
+
+// Handle content inside content tags
+func (f *XMLTagFilter) handleContentTagContent(chunk string, index int) (bool, int) {
+	c := chunk[index]
+
+	// Check if this might be the start of a </content> closing tag
+	if c == '<' {
+		// If not enough characters left to determine if it's a </content> tag, store in pendingBuffer
+		if index+9 >= len(chunk) {
+			f.pendingBuffer.WriteString(chunk[index:])
+			return true, len(chunk)
+		}
+
+		// Check if it's a </content> closing tag
+		if chunk[index:index+10] == "</content>" {
+			// Don't output the </content> tag
+			f.inContentTag = false
+			return true, index + 9
+		}
+	}
+
+	// Inside content tag, output character directly
+	f.buffer.WriteByte(c)
+	return true, index
+}
+
+// Handle opening of special tags
+func (f *XMLTagFilter) handleSpecialTagOpening(chunk string, index int) (bool, int) {
+	// Check for <diff> tag
+	if index+5 < len(chunk) && chunk[index:index+6] == "<diff>" {
+		// Don't output the <diff> tag
+		f.inDiffTag = true
+		return true, index + 5
+	}
+
+	// Check for <content> tag
+	if index+8 < len(chunk) && chunk[index:index+9] == "<content>" {
+		// Don't output the <content> tag
+		f.inContentTag = true
+		return true, index + 8
+	}
+
+	// If not enough characters left to determine if it's a special tag, store in pendingBuffer
+	if index+8 >= len(chunk) {
+		f.pendingBuffer.WriteString(chunk[index:])
+		return true, len(chunk) - 1
+	}
+
+	return false, index
+}
+
+// Process a tag (opening or closing)
+func (f *XMLTagFilter) processTag(tag string) {
+	// Check if it's a closing tag
+	if strings.HasPrefix(tag, "/") {
+		f.processClosingTag(tag[1:]) // Remove the leading '/'
+	} else {
+		f.processOpeningTag(tag)
+	}
+}
+
+// Process a closing tag
+func (f *XMLTagFilter) processClosingTag(tagName string) {
+	// Check if we're closing a tag in our stack
+	if len(f.tagStack) > 0 && f.tagStack[len(f.tagStack)-1] == tagName {
+		// Pop the tag from stack
+		f.tagStack = f.tagStack[:len(f.tagStack)-1]
+
+		// If we're closing the root tool tag, exit tool tag mode
+		if len(f.tagStack) == 0 && isToolTag(tagName) {
+			f.inToolTag = false
+			f.inSubTag = false
+			f.currentSubTag = ""
+		} else if f.inToolTag && len(f.tagStack) == 1 {
+			// We're closing a sub-tag inside a tool tag
+
+			// Reset color before closing the sub-tag
+			f.buffer.WriteString(core.ColorReset)
+
+			f.inSubTag = false
+			f.currentSubTag = ""
+
+			// Add a newline after the sub-tag content for better formatting
+			f.buffer.WriteByte('\n')
+		}
+	}
+}
+
+// Process an opening tag
+func (f *XMLTagFilter) processOpeningTag(tag string) {
+	// If it's a root tool tag, enter tool tag mode but don't output the tag
+	if len(f.tagStack) == 0 && isToolTag(tag) {
+		f.inToolTag = true
+	} else if f.inToolTag && len(f.tagStack) == 1 {
+		// It's a sub-tag inside a tool tag
+		f.inSubTag = true
+		f.currentSubTag = tag
+
+		// Skip requires_approval tag
+		if isHiddenTag(tag) {
+			// Don't show this tag or its content
+			f.tagStack = append(f.tagStack, tag) // Still need to push to stack
+			return
+		}
+
+		// Add prefix based on tool name and tag type
+		f.buffer.WriteString(toolTagPrefix(f.tagStack[0], tag))
+
+		// Apply color based on sub-tag type
+		if tag == "path" {
+			f.buffer.WriteString(core.ColorGreen)
+		} else if tag == "command" {
+			f.buffer.WriteString(core.ColorYellow)
+		} else if tag == "content" {
+			//f.buffer.WriteString(core.ColorBlue)
+		}
+	} else if !f.inToolTag {
+		// For tags outside tool tags, output the tag
+		f.buffer.WriteByte('<')
+		f.buffer.WriteString(tag)
+		f.buffer.WriteByte('>')
+	}
+
+	// Push the tag to stack
+	f.tagStack = append(f.tagStack, tag)
 }
 
 func toolTagPrefix(tool string, tag string) string {
