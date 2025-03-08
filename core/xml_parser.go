@@ -23,6 +23,13 @@ func ParseToolUse(content string) map[string]interface{} {
 			params["result"] = resultMatch[1]
 		}
 
+		// Extract command if available
+		commandRegex := regexp.MustCompile(`<command>([\s\S]*?)</command>`)
+		commandMatch := commandRegex.FindStringSubmatch(content)
+		if len(commandMatch) > 1 {
+			params["command"] = commandMatch[1]
+		}
+
 		return params
 	}
 

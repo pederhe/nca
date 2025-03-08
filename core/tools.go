@@ -20,7 +20,7 @@ func ExecuteCommand(params map[string]interface{}) string {
 
 	requiresApproval, _ := params["requires_approval"].(bool)
 	if requiresApproval {
-		fmt.Printf("Need to execute command: %s\nContinue? (y/n): ", command)
+		fmt.Printf("Need to execute command: %s%s%s\nContinue? (y/n): ", ColorYellow, command, ColorReset)
 		var response string
 		fmt.Scanln(&response)
 		if strings.ToLower(response) != "y" {
@@ -191,17 +191,17 @@ func SearchFiles(params map[string]interface{}) string {
 
 			for _, match := range matches {
 				start, end := match[0], match[1]
-				
+
 				// Find line numbers
 				lineStart := strings.Count(fileContent[:start], "\n")
 				lineEnd := lineStart + strings.Count(fileContent[start:end], "\n")
-				
+
 				// Get context (3 lines before and after)
 				contextStart := max(0, lineStart-3)
 				contextEnd := min(len(lines), lineEnd+4)
-				
+
 				results.WriteString(fmt.Sprintf("Match at lines %d-%d:\n", lineStart+1, lineEnd+1))
-				
+
 				// Print context
 				for i := contextStart; i < contextEnd; i++ {
 					prefix := "  "
@@ -210,7 +210,7 @@ func SearchFiles(params map[string]interface{}) string {
 					}
 					results.WriteString(fmt.Sprintf("%s%4d: %s\n", prefix, i+1, lines[i]))
 				}
-				
+
 				results.WriteString("\n")
 			}
 		}
@@ -389,40 +389,61 @@ func isCodeFile(ext string) bool {
 
 func extractDefinitions(content, ext string) []string {
 	var definitions []string
-	
+
 	switch ext {
 	case ".go":
 		// Match Go functions and type definitions
 		funcRe := regexp.MustCompile(`func\s+([A-Za-z0-9_]+)`)
 		typeRe := regexp.MustCompile(`type\s+([A-Za-z0-9_]+)`)
-		
+
 		funcMatches := funcRe.FindAllStringSubmatch(content, -1)
 		for _, match := range funcMatches {
 			definitions = append(definitions, "func "+match[1])
 		}
-		
+
 		typeMatches := typeRe.FindAllStringSubmatch(content, -1)
 		for _, match := range typeMatches {
 			definitions = append(definitions, "type "+match[1])
 		}
-	
+
 	case ".js", ".ts":
 		// Match JavaScript/TypeScript functions and class definitions
 		funcRe := regexp.MustCompile(`function\s+([A-Za-z0-9_]+)`)
 		classRe := regexp.MustCompile(`class\s+([A-Za-z0-9_]+)`)
-		
+
 		funcMatches := funcRe.FindAllStringSubmatch(content, -1)
 		for _, match := range funcMatches {
 			definitions = append(definitions, "function "+match[1])
 		}
-		
+
 		classMatches := classRe.FindAllStringSubmatch(content, -1)
 		for _, match := range classMatches {
 			definitions = append(definitions, "class "+match[1])
 		}
-	
-	// Can add support for more languages
+
+		// Can add support for more languages
 	}
-	
+
 	return definitions
-} 
+}
+
+func FollowupQuestion(params map[string]interface{}) string {
+	// 从工具使用中获取问题
+	question, ok := params["question"].(string)
+	if !ok || question == "" {
+		return "Error: No question provided for ask_followup_question tool"
+	}
+
+	return ""
+}
+
+// PlanModeResponse 处理计划模式下的响应
+func PlanModeResponse(params map[string]interface{}) string {
+	// 从工具使用中获取响应内容
+	response, ok := params["response"].(string)
+	if !ok || response == "" {
+		return "Error: No response provided for plan_mode_response tool"
+	}
+
+	return ""
+}
