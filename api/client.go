@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourusername/nca/config"
+	"github.com/pederhe/nca/config"
 )
 
 // Message represents a message in a conversation

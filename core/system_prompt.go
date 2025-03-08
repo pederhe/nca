@@ -6,13 +6,15 @@ import (
 	"runtime"
 	"strings"
 	"text/template"
+
+	"github.com/pederhe/nca/utils"
 )
 
 // SystemPrompt come from cline https://github.com/cline/cline
 // I modified it to fit my needs
 // BuildSystemPrompt builds the system prompt
 func BuildSystemPrompt() (string, error) {
-	shell := GetShell()
+	shell := utils.GetShell()
 	osName := getOSName()
 
 	homeDir, err := os.UserHomeDir()

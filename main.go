@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/yourusername/nca/api"
-	"github.com/yourusername/nca/config"
-	"github.com/yourusername/nca/core"
+	"github.com/chzyer/readline"
+	"github.com/pederhe/nca/api"
+	"github.com/pederhe/nca/config"
+	"github.com/pederhe/nca/core"
 )
 
 // Version information, injected by compiler
@@ -21,10 +23,19 @@ var (
 	CommitHash = "unknown"
 )
 
+// Debug mode variables
+var (
+	debugMode    bool
+	debugLogFile *os.File
+	sessionID    string
+	debugLogPath string
+)
+
 func main() {
 	// Parse command line arguments
 	promptFlag := flag.Bool("p", false, "Run a one-time query and exit")
 	versionFlag := flag.Bool("v", false, "Show version information")
+	debugFlag := flag.Bool("debug", false, "Enable debug mode to log conversation data")
 	flag.Parse()
 
 	// Show version information
@@ -35,10 +46,19 @@ func main() {
 		return
 	}
 
+	// Initialize debug mode if enabled
+	if *debugFlag {
+		debugMode = true
+		initDebugMode()
+		defer closeDebugLog()
+		logDebug("Program started with debug mode enabled\n")
+	}
+
 	args := flag.Args()
 
 	// Handle config command
 	if len(args) > 0 && args[0] == "config" {
+		logDebug(fmt.Sprintf("Config command: %v\n", args))
 		handleConfigCommand(args[1:])
 		return
 	}
@@ -47,15 +67,27 @@ func main() {
 	stat, _ := os.Stdin.Stat()
 	hasPipe := (stat.Mode() & os.ModeCharDevice) == 0
 
+	// Prepare initial prompt from args
 	var initialPrompt string
 	if len(args) > 0 {
-		initialPrompt = args[0]
+		initialPrompt = strings.Join(args, " ")
 	}
 
 	// Handle pipe input
-	if hasPipe && *promptFlag {
+	if hasPipe {
+		logDebug("Detected pipe input\n")
+		// Read from pipe
 		reader := bufio.NewReader(os.Stdin)
-		content, _ := io.ReadAll(reader)
+		content, err := io.ReadAll(reader)
+		if err != nil {
+			fmt.Println("Error reading from pipe:", err)
+			logDebug(fmt.Sprintf("Error reading from pipe: %s\n", err))
+			return
+		}
+
+		logDebug(fmt.Sprintf("Pipe input content length: %d bytes\n", len(content)))
+
+		// Combine pipe content with initial prompt if any
 		if initialPrompt == "" {
 			initialPrompt = string(content)
 		} else {
@@ -65,8 +97,18 @@ func main() {
 
 	// Run REPL or one-off query
 	if *promptFlag {
+		if initialPrompt == "" {
+			fmt.Println("Error: No prompt provided for one-time query")
+			logDebug("Error: No prompt provided for one-time query\n")
+			return
+		}
+		logDebug(fmt.Sprintf("One-time query mode with prompt: %s\n", initialPrompt))
 		runOneOffQuery(initialPrompt)
 	} else {
+		logDebug("Starting interactive REPL mode\n")
+		if initialPrompt != "" {
+			logDebug(fmt.Sprintf("With initial prompt: %s\n", initialPrompt))
+		}
 		runREPL(initialPrompt)
 	}
 }
@@ -114,26 +156,79 @@ func handleConfigCommand(args []string) {
 func runREPL(initialPrompt string) {
 	conversation := []map[string]string{}
 
+	// Log REPL start in debug mode
+	logDebug("Starting REPL session\n")
+	if initialPrompt != "" {
+		logDebug(fmt.Sprintf("Initial prompt: %s\n", initialPrompt))
+	}
+
 	// If there's an initial prompt, handle it first
 	if initialPrompt != "" {
 		handlePrompt(initialPrompt, &conversation)
 	} else {
 		fmt.Printf("NCA %s (%s,%s)\n", Version, BuildTime, CommitHash)
 		fmt.Println("Type /help for help")
+		if debugMode {
+			fmt.Printf(core.ColorYellow+"Debug mode enabled. Logs saved to: %s\n"+core.ColorReset, debugLogPath)
+		}
 	}
 
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		fmt.Print(core.ColorPurple + ">>> " + core.ColorReset)
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
+	// Create custom completer for commands
+	completer := readline.NewPrefixCompleter(
+		readline.PcItem("/clear"),
+		readline.PcItem("/help"),
+		readline.PcItem("/exit"),
+		readline.PcItem("/quit"),
+	)
 
+	// Initialize readline with custom config
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:            core.ColorPurple + ">>> " + core.ColorReset,
+		HistoryFile:       os.Getenv("HOME") + "/.nca_history",
+		InterruptPrompt:   "^C",
+		EOFPrompt:         "exit",
+		HistorySearchFold: true, // Case-insensitive history search
+		AutoComplete:      completer,
+	})
+	if err != nil {
+		fmt.Println("Error initializing readline:", err)
+		logDebug(fmt.Sprintf("Error initializing readline: %s\n", err))
+		return
+	}
+	defer rl.Close()
+
+	for {
+		// Read input using readline
+		input, err := rl.Readline()
+		if err != nil {
+			// Handle Ctrl+C or Ctrl+D
+			if err == readline.ErrInterrupt {
+				fmt.Println("Interrupted")
+				logDebug("User interrupted input with Ctrl+C\n")
+				continue
+			} else if err == io.EOF {
+				fmt.Println("Exiting")
+				logDebug("User exited with Ctrl+D\n")
+				break
+			}
+			fmt.Println("Error reading input:", err)
+			logDebug(fmt.Sprintf("Error reading input: %s\n", err))
+			continue
+		}
+
+		input = strings.TrimSpace(input)
 		if input == "" {
 			continue
 		}
 
 		// Handle slash command
 		if strings.HasPrefix(input, "/") {
+			logDebug(fmt.Sprintf("Slash command: %s\n", input))
+			if input == "/exit" || input == "/quit" {
+				fmt.Println("Exiting")
+				logDebug("User exited with /exit or /quit command\n")
+				break
+			}
 			handleSlashCommand(input, &conversation)
 			continue
 		}
@@ -145,7 +240,13 @@ func runREPL(initialPrompt string) {
 // Run one-off query
 func runOneOffQuery(prompt string) {
 	conversation := []map[string]string{}
+
+	logDebug("Running one-off query mode\n")
+	logDebug(fmt.Sprintf("Query: %s\n", prompt))
+
 	handlePrompt(prompt, &conversation)
+
+	logDebug("One-off query completed\n")
 }
 
 // Handle user input prompt
@@ -156,6 +257,9 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 		"content": prompt,
 	})
 
+	// Log user input in debug mode
+	logDebug(fmt.Sprintf("USER INPUT: %s\n", prompt))
+
 	// Count of consecutive responses without tool use
 	noToolUseCount := 0
 
@@ -165,6 +269,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 		response, err := callAPI(*conversation)
 		if err != nil {
 			fmt.Println("Error calling API:", err)
+			logDebug(fmt.Sprintf("API ERROR: %s\n", err))
 			break
 		}
 
@@ -182,7 +287,14 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			// Reset the counter for responses without tool use
 			noToolUseCount = 0
 
+			// Log tool use in debug mode
+			toolName, _ := toolUse["tool"].(string)
+			logDebug(fmt.Sprintf("TOOL USE: %s\n", toolName))
+
 			result := handleToolUse(toolUse)
+
+			// Log tool result in debug mode
+			logDebug(fmt.Sprintf("TOOL RESULT: %s\n", result))
 
 			// Format tool description based on tool type
 			toolDesc := formatToolDescription(toolUse)
@@ -194,8 +306,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 				"content": toolResultContent,
 			})
 
-			toolName, _ := toolUse["tool"].(string)
-
+			// Get tool name (already extracted above)
 			// Check if it's the task completion tool
 			if toolName == "attempt_completion" {
 				fmt.Println(core.ColorYellow + result + core.ColorReset)
@@ -215,7 +326,8 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			// Check if exceeded 3 attempts without tool use
 			if noToolUseCount >= 3 {
 				errorMessage := "[FATAL ERROR] You failed to use a tool after 3 attempts. Exiting task."
-				fmt.Println("\n" + errorMessage)
+				//fmt.Println("\n" + errorMessage)
+				logDebug(fmt.Sprintf("ERROR: %s\n", errorMessage))
 				*conversation = append(*conversation, map[string]string{
 					"role":    "user",
 					"content": errorMessage,
@@ -225,7 +337,8 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 
 			// No tool use request, add error message to conversation history
 			errorMessage := fmt.Sprintf("[ERROR] You did not use a tool in your previous response! Please retry with a tool use. (Attempt %d/3)", noToolUseCount)
-			fmt.Println("\n" + errorMessage)
+			//fmt.Println("\n" + errorMessage)
+			logDebug(fmt.Sprintf("ERROR: %s\n", errorMessage))
 			*conversation = append(*conversation, map[string]string{
 				"role":    "user",
 				"content": errorMessage,
@@ -278,12 +391,19 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 	case "/clear":
 		*conversation = []map[string]string{}
 		fmt.Println("Conversation history cleared")
+		logDebug("Conversation history cleared by user\n")
 	case "/help":
 		fmt.Println("Available commands:")
 		fmt.Println("/clear - Clear conversation history")
+		fmt.Println("/exit, /quit - Exit the program")
 		fmt.Println("/help - Show help information")
+		logDebug("Help information displayed\n")
+	case "/exit", "/quit":
+		// These are handled in the runREPL function
+		// Nothing to do here
 	default:
 		fmt.Println("Unknown command. Enter /help for help")
+		logDebug(fmt.Sprintf("Unknown command attempted: %s\n", cmd))
 	}
 }
 
@@ -297,6 +417,7 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	// Build system prompt
 	systemPrompt, err := core.BuildSystemPrompt()
 	if err != nil {
+		logDebug(fmt.Sprintf("ERROR building system prompt: %s\n", err))
 		return APIResponse{}, fmt.Errorf("error building system prompt: %s", err)
 	}
 
@@ -314,6 +435,17 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 			Role:    msg["role"],
 			Content: msg["content"],
 		})
+	}
+
+	// Log API request in debug mode
+	logDebug("API REQUEST PAYLOAD:\n")
+	for i, msg := range messages {
+		// Truncate system message for brevity in logs
+		content := msg.Content
+		if msg.Role == "system" && len(content) > 100 {
+			content = content[:100] + "... [truncated]"
+		}
+		logDebug(fmt.Sprintf("  [%d] %s: %s\n", i, msg.Role, content))
 	}
 
 	// Create API client
@@ -348,6 +480,9 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	content, err := client.ChatStream(messages, callback)
 	fmt.Println() // Add newline after streaming completes
 
+	// Log raw response in debug mode
+	logDebug(fmt.Sprintf("RAW API RESPONSE STREAM:\n%s\n", content))
+
 	// Ensure loading animation is stopped
 	if !animationStopped {
 		stopLoading <- true
@@ -355,6 +490,7 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	}
 
 	if err != nil {
+		logDebug(fmt.Sprintf("API STREAM ERROR: %s\n", err))
 		return APIResponse{}, fmt.Errorf("API call error: %s", err)
 	}
 
@@ -769,5 +905,66 @@ func handleToolUse(toolUse map[string]interface{}) string {
 		return core.PlanModeResponse(toolUse)
 	default:
 		return fmt.Sprintf("Error: Unknown tool '%s'", toolName)
+	}
+}
+
+// Initialize debug mode, creating necessary directories and log file
+func initDebugMode() {
+	// Create base debug directory if it doesn't exist
+	debugBaseDir := filepath.Join(os.Getenv("HOME"), ".nca", "debug")
+	if err := os.MkdirAll(debugBaseDir, 0755); err != nil {
+		fmt.Printf("Warning: Failed to create debug directory: %s\n", err)
+		debugMode = false
+		return
+	}
+
+	// Create directory for today's date
+	now := time.Now()
+	dateDir := filepath.Join(debugBaseDir, now.Format("2006-01-02"))
+	if err := os.MkdirAll(dateDir, 0755); err != nil {
+		fmt.Printf("Warning: Failed to create date directory: %s\n", err)
+		debugMode = false
+		return
+	}
+
+	// Generate unique session ID based on timestamp
+	sessionID = now.Format("150405-") + fmt.Sprintf("%03d", now.Nanosecond()/1000000)
+
+	// Create log file
+	debugLogPath = filepath.Join(dateDir, fmt.Sprintf("session_%s.log", sessionID))
+	var err error
+	debugLogFile, err = os.Create(debugLogPath)
+	if err != nil {
+		fmt.Printf("Warning: Failed to create debug log file: %s\n", err)
+		debugMode = false
+		return
+	}
+
+	// Log session start
+	logDebug(fmt.Sprintf("Session started at %s\n", now.Format(time.RFC3339)))
+	logDebug(fmt.Sprintf("NCA version: %s, Build time: %s, Commit hash: %s\n",
+		Version, BuildTime, CommitHash))
+}
+
+// Write a message to the debug log
+func logDebug(message string) {
+	if !debugMode || debugLogFile == nil {
+		return
+	}
+
+	timestamp := time.Now().Format("15:04:05.000")
+	logEntry := fmt.Sprintf("[%s] %s", timestamp, message)
+
+	if _, err := debugLogFile.WriteString(logEntry); err != nil {
+		fmt.Printf("Warning: Failed to write to debug log: %s\n", err)
+	}
+}
+
+// Close the debug log file
+func closeDebugLog() {
+	if debugLogFile != nil {
+		logDebug("Session ended\n")
+		debugLogFile.Close()
+		debugLogFile = nil
 	}
 }
