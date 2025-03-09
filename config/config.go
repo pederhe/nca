@@ -89,4 +89,24 @@ func Unset(key string, isGlobal bool) error {
 	config := loadConfig(isGlobal)
 	delete(config, key)
 	return saveConfig(config, isGlobal)
-} 
+}
+
+// GetAll returns all configuration values
+func GetAll() map[string]string {
+	// Merge global and local configs, with local taking precedence
+	result := make(map[string]string)
+
+	// First load global config
+	globalConfig := loadConfig(true)
+	for k, v := range globalConfig {
+		result[k] = v
+	}
+
+	// Then load local config, overriding any global settings
+	localConfig := loadConfig(false)
+	for k, v := range localConfig {
+		result[k] = v
+	}
+
+	return result
+}

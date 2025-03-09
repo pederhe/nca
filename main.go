@@ -117,7 +117,7 @@ func main() {
 // Handle config command
 func handleConfigCommand(args []string) {
 	if len(args) == 0 {
-		fmt.Println("Usage: nca config [set|unset] [--global] [key] [value]")
+		fmt.Println("Usage: nca config [set|unset|list] [--global] [key] [value]")
 		return
 	}
 
@@ -148,8 +148,23 @@ func handleConfigCommand(args []string) {
 		}
 		config.Unset(cmdArgs[1], isGlobal)
 		fmt.Printf("Removed setting %s\n", cmdArgs[1])
+	case "list":
+		// Get all configuration values
+		allConfigs := config.GetAll()
+
+		if len(allConfigs) == 0 {
+			fmt.Println("No configuration settings found.")
+			return
+		}
+
+		fmt.Println("Current configuration settings:")
+		fmt.Println("------------------------------")
+		for key, value := range allConfigs {
+			fmt.Printf("%s = %s\n", key, value)
+		}
+		fmt.Println("------------------------------")
 	default:
-		fmt.Println("Unknown config command. Available commands: set, unset")
+		fmt.Println("Unknown config command. Available commands: set, unset, list")
 	}
 }
 
