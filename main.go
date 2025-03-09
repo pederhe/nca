@@ -290,7 +290,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 
 			// Log tool use in debug mode
 			toolName, _ := toolUse["tool"].(string)
-			logDebug(fmt.Sprintf("TOOL USE: %s\n", toolName))
+			logDebug(fmt.Sprintf("TOOL USE: %v\n", toolUse))
 
 			result := handleToolUse(toolUse)
 
@@ -380,6 +380,16 @@ func formatToolDescription(toolUse map[string]interface{}) string {
 			return fmt.Sprintf("[%s for '%s' in '%s']", toolName, regex, filePattern)
 		}
 		return fmt.Sprintf("[%s for '%s']", toolName, regex)
+
+	case "git_commit":
+		message, _ := toolUse["message"].(string)
+		files, ok := toolUse["files"].([]string)
+
+		if ok && len(files) > 0 {
+			return fmt.Sprintf("[%s for message '%s' with files: %s]", toolName, message, strings.Join(files, ", "))
+		}
+
+		return fmt.Sprintf("[%s for message '%s']", toolName, message)
 
 	default:
 		return fmt.Sprintf("[%s]", toolName)
@@ -577,6 +587,8 @@ func handleToolUse(toolUse map[string]interface{}) string {
 		return core.FollowupQuestion(toolUse)
 	case "plan_mode_response":
 		return core.PlanModeResponse(toolUse)
+	case "git_commit":
+		return core.GitCommit(toolUse)
 	default:
 		return fmt.Sprintf("Error: Unknown tool '%s'", toolName)
 	}

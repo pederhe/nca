@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io/fs"
@@ -448,4 +449,72 @@ func PlanModeResponse(params map[string]interface{}) string {
 	}
 
 	return ""
+}
+
+// GitCommit handles the git_commit tool functionality
+func GitCommit(params map[string]interface{}) string {
+	// Extract parameters
+	commitMessage, ok := params["message"].(string)
+	if !ok || commitMessage == "" {
+		return "Error: message parameter is required for git_commit"
+	}
+
+	// Extract files parameter
+	var modifiedFiles []string
+	if filesParam, ok := params["files"].([]string); ok && len(filesParam) > 0 {
+		modifiedFiles = filesParam
+	}
+
+	// Validate parameters
+	if len(modifiedFiles) == 0 {
+		return "Error: files parameter is required for git_commit"
+	}
+
+	// Display files to be committed
+	fmt.Println("Files to be committed:")
+	for _, file := range modifiedFiles {
+		fmt.Printf("  %s%s%s\n", utils.ColorGreen, file, utils.ColorReset)
+	}
+
+	// Ask for confirmation to proceed with these files
+	fmt.Print("Do you want to proceed with these files? (y/n): ")
+	var response string
+	fmt.Scanln(&response)
+	if strings.ToLower(response) != "y" {
+		return "Commit cancelled"
+	}
+
+	fmt.Printf("Commit message: %s%s%s\n", utils.ColorYellow, commitMessage, utils.ColorReset)
+	fmt.Print("Do you want to use this message? (y/n/custom): ")
+
+	reader := bufio.NewReader(os.Stdin)
+	response, _ = reader.ReadString('\n')
+	response = strings.TrimSpace(response)
+
+	if strings.ToLower(response) == "n" {
+		return "Commit cancelled"
+	} else if strings.ToLower(response) != "y" {
+		// User wants to provide a custom message
+		fmt.Print("Enter your custom commit message: ")
+		customMessage, _ := reader.ReadString('\n')
+		customMessage = strings.TrimSpace(customMessage)
+
+		if customMessage != "" {
+			commitMessage = customMessage
+		}
+	}
+
+	// Now execute the add and commit operations
+	err := utils.GitAdd(modifiedFiles) // Add specified files
+	if err != nil {
+		return fmt.Sprintf("Error adding files to staging area: %s", err)
+	}
+
+	// Commit changes
+	err = utils.GitCommit(commitMessage)
+	if err != nil {
+		return fmt.Sprintf("Error committing changes: %s", err)
+	}
+
+	return fmt.Sprintf("Successfully committed changes with message: %s", commitMessage)
 }

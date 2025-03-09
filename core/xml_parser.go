@@ -88,6 +88,30 @@ func ParseToolUse(content string) map[string]interface{} {
 			params["requires_approval"] = approvalValue == "true"
 		}
 
+	case "git_commit":
+		// Extract message parameter - required
+		messageMatch := regexp.MustCompile(`<message>([\s\S]*?)</message>`).FindStringSubmatch(toolBlock)
+		if len(messageMatch) > 1 {
+			params["message"] = strings.TrimSpace(messageMatch[1])
+		}
+
+		// Extract files parameter - required
+		filesMatch := regexp.MustCompile(`<files>([\s\S]*?)</files>`).FindStringSubmatch(toolBlock)
+		if len(filesMatch) > 1 {
+			filesContent := strings.TrimSpace(filesMatch[1])
+			if filesContent != "" {
+				// Split by newlines and trim each line
+				filesList := []string{}
+				for _, file := range strings.Split(filesContent, "\n") {
+					trimmedFile := strings.TrimSpace(file)
+					if trimmedFile != "" {
+						filesList = append(filesList, trimmedFile)
+					}
+				}
+				params["files"] = filesList
+			}
+		}
+
 	case "read_file":
 		// path is already handled above
 

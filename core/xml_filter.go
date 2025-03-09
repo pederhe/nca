@@ -198,6 +198,13 @@ func (f *XMLTagFilter) processTag(tag string) {
 
 // Process a closing tag
 func (f *XMLTagFilter) processClosingTag(tagName string) {
+	// 特殊处理thinking标签，不输出关闭标签
+	if tagName == "thinking" && len(f.tagStack) > 0 && f.tagStack[len(f.tagStack)-1] == "thinking" {
+		// 只从标签栈中移除，不做其他处理
+		f.tagStack = f.tagStack[:len(f.tagStack)-1]
+		return
+	}
+
 	// Check if we're closing a tag in our stack
 	if len(f.tagStack) > 0 && f.tagStack[len(f.tagStack)-1] == tagName {
 		// Pop the tag from stack
@@ -217,14 +224,22 @@ func (f *XMLTagFilter) processClosingTag(tagName string) {
 			f.inSubTag = false
 			f.currentSubTag = ""
 
-			// Add a newline after the sub-tag content for better formatting
-			f.buffer.WriteByte('\n')
+			if !isHiddenTag(tagName) {
+				// Add a newline after the sub-tag content for better formatting
+				f.buffer.WriteByte('\n')
+			}
 		}
 	}
 }
 
 // Process an opening tag
 func (f *XMLTagFilter) processOpeningTag(tag string) {
+	// 特殊处理thinking标签，不输出开始标签，但仍然将其加入标签栈
+	if tag == "thinking" {
+		f.tagStack = append(f.tagStack, tag)
+		return
+	}
+
 	// If it's a root tool tag, enter tool tag mode but don't output the tag
 	if len(f.tagStack) == 0 && isToolTag(tag) {
 		f.inToolTag = true
@@ -292,15 +307,17 @@ func toolTagPrefix(tool string, tag string) string {
 		if tag == "path" {
 			return "Code file: "
 		}
+	case "git_commit":
+		if tag == "message" {
+			return "Git commit: "
+		}
 	}
-
 	return ""
 }
 
 // Check if a tag is a tool tag
 func isToolTag(tag string) bool {
 	toolTags := []string{
-		"thinking",
 		"execute_command",
 		"read_file",
 		"write_to_file",
@@ -311,6 +328,7 @@ func isToolTag(tag string) bool {
 		"attempt_completion",
 		"ask_followup_question",
 		"plan_mode_response",
+		"git_commit",
 	}
 
 	for _, toolTag := range toolTags {
