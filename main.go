@@ -12,6 +12,7 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/pederhe/nca/api"
+	"github.com/pederhe/nca/api/types"
 	"github.com/pederhe/nca/config"
 	"github.com/pederhe/nca/core"
 	"github.com/pederhe/nca/utils"
@@ -305,6 +306,13 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 		if err != nil {
 			fmt.Println("Error calling API:", err)
 			logDebug(fmt.Sprintf("API ERROR: %s\n", err))
+
+			// Remove the last user message to avoid consecutive user messages
+			// 像DeepSeek-R1这样的模型不支持连续的user消息
+			if len(*conversation) > 0 && (*conversation)[len(*conversation)-1]["role"] == "user" {
+				*conversation = (*conversation)[:len(*conversation)-1]
+			}
+
 			break
 		}
 
@@ -331,16 +339,6 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			// Log tool result in debug mode
 			logDebug(fmt.Sprintf("TOOL RESULT: %s\n", result))
 
-			// Format tool description based on tool type
-			toolDesc := formatToolDescription(toolUse)
-
-			// Add tool result to conversation history with description
-			toolResultContent := fmt.Sprintf("%s Result:\n%s", toolDesc, result)
-			*conversation = append(*conversation, map[string]string{
-				"role":    "user",
-				"content": toolResultContent,
-			})
-
 			// Get tool name (already extracted above)
 			// Check if it's the task completion tool
 			if toolName == "attempt_completion" {
@@ -352,6 +350,17 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 				// Task completed, exit loop
 				break
 			}
+
+			// Format tool description based on tool type
+			toolDesc := formatToolDescription(toolUse)
+
+			// Add tool result to conversation history with description
+			// 任务最后一个工具使用结果不记录，像DeepSeek-R1这样的模型不支持连续的user消息
+			toolResultContent := fmt.Sprintf("%s Result:\n%s", toolDesc, result)
+			*conversation = append(*conversation, map[string]string{
+				"role":    "user",
+				"content": toolResultContent,
+			})
 
 			// Continue loop, process next step
 		} else {
@@ -455,7 +464,8 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 
 // API response structure
 type APIResponse struct {
-	Content string `json:"content"`
+	ReasoningContent string `json:"reasoning_content"`
+	Content          string `json:"content"`
 }
 
 // Call AI API
@@ -468,7 +478,7 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	}
 
 	// Prepare messages
-	messages := []api.Message{
+	messages := []types.Message{
 		{
 			Role:    "system",
 			Content: systemPrompt,
@@ -477,7 +487,7 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 
 	// Add conversation history
 	for _, msg := range conversation {
-		messages = append(messages, api.Message{
+		messages = append(messages, types.Message{
 			Role:    msg["role"],
 			Content: msg["content"],
 		})
@@ -495,7 +505,11 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	}
 
 	// Create API client
-	client := api.NewClient()
+	client, err := api.NewClient()
+	if err != nil {
+		fmt.Println("Error: Failed to create API client:", err)
+		os.Exit(1)
+	}
 
 	// Start dynamic loading animation
 	stopLoading := make(chan bool, 1)   // Use buffered channel to prevent blocking
@@ -507,27 +521,40 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 
 	// Flag to track if animation has been stopped
 	var animationStopped bool = false
+	var startReasoning bool = false
 
 	// Define callback function for streaming
-	callback := func(chunk string, isDone bool) {
+	callback := func(reasoningChunk string, chunk string, isDone bool) {
 		// Stop loading animation when first response chunk is received
-		if len(chunk) > 0 && !animationStopped {
+		if (len(reasoningChunk) > 0 || len(chunk) > 0) && !animationStopped {
 			stopLoading <- true
 			<-animationDone // Wait for animation to actually stop
 			animationStopped = true
 		}
 
-		// Filter and print the chunk
-		filtered := filter.ProcessChunk(chunk)
-		fmt.Print(filtered)
+		if reasoningChunk != "" {
+			if !startReasoning {
+				startReasoning = true
+				fmt.Println(utils.ColorBlue + "Reasoning:" + utils.ColorReset)
+			}
+			fmt.Print(reasoningChunk)
+		} else if chunk != "" {
+			if startReasoning {
+				fmt.Println(utils.ColorBlue + "\n----------------------------" + utils.ColorReset)
+				startReasoning = false
+			}
+			// Filter and print the chunk
+			filtered := filter.ProcessChunk(chunk)
+			fmt.Print(filtered)
+		}
 	}
 
 	// Call API with streaming
-	content, err := client.ChatStream(messages, callback)
+	reasoningContent, content, err := client.ChatStream(messages, callback)
 	fmt.Println() // Add newline after streaming completes
 
 	// Log raw response in debug mode
-	logDebug(fmt.Sprintf("RAW API RESPONSE STREAM:\n%s\n", content))
+	logDebug(fmt.Sprintf("RAW API RESPONSE STREAM:\n%s\n%s\n", reasoningContent, content))
 
 	// Ensure loading animation is stopped
 	if !animationStopped {
@@ -541,17 +568,19 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	}
 
 	// Remove <thinking></thinking> tags from the response
-	cleanedContent := core.RemoveThinkingTags(content)
+	//cleanedContent := core.RemoveThinkingTags(content)
+	// The thinking tags here are the AI's thought process, not reasoning process, so we're not removing them yet
 
 	return APIResponse{
-		Content: cleanedContent,
+		ReasoningContent: reasoningContent,
+		Content:          content,
 	}, nil
 }
 
 // Display loading animation
 func showLoadingAnimation(stop chan bool, done chan bool) {
 	// Loading animation characters
-	spinChars := []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
+	spinChars := []string{"⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽", "⣾"}
 	i := 0
 
 	// Clear current line and display initial message

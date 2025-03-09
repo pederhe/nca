@@ -309,7 +309,7 @@ func toolTagPrefix(tool string, tag string) string {
 		}
 	case "git_commit":
 		if tag == "message" {
-			return "Git commit: "
+			return "Git commit:\n"
 		}
 	}
 	return ""
