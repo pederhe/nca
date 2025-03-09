@@ -33,6 +33,11 @@ var (
 )
 
 func main() {
+	// Set custom usage function for flag package
+	flag.Usage = func() {
+		displayHelp()
+	}
+
 	// Parse command line arguments
 	promptFlag := flag.Bool("p", false, "Run a one-time query and exit")
 	versionFlag := flag.Bool("v", false, "Show version information")
@@ -57,11 +62,25 @@ func main() {
 
 	args := flag.Args()
 
-	// Handle config command
-	if len(args) > 0 && args[0] == "config" {
-		logDebug(fmt.Sprintf("Config command: %v\n", args))
-		handleConfigCommand(args[1:])
-		return
+	// Process command line arguments
+	if len(args) > 0 {
+		switch args[0] {
+		case "config":
+			// Handle configuration settings command
+			logDebug(fmt.Sprintf("Config command: %v\n", args))
+			handleConfigCommand(args[1:])
+			return
+		case "commit":
+			// Handle git commit operation command
+			logDebug("Commit command detected\n")
+			runREPL("commit all current changes, and summarize the changes")
+			return
+		case "help":
+			// Display help information
+			logDebug("Help command detected\n")
+			displayHelp()
+			return
+		}
 	}
 
 	// Check if there's pipe input
@@ -419,10 +438,11 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 		fmt.Println("Conversation history cleared")
 		logDebug("Conversation history cleared by user\n")
 	case "/help":
-		fmt.Println("Available commands:")
-		fmt.Println("/clear - Clear conversation history")
-		fmt.Println("/exit, /quit - Exit the program")
-		fmt.Println("/help - Show help information")
+		fmt.Println("\nINTERACTIVE COMMANDS:")
+		fmt.Println("  /clear  - Clear conversation history")
+		fmt.Println("  /exit   - Exit the program")
+		fmt.Println("  /quit   - Exit the program")
+		fmt.Println("  /help   - Show help information")
 		logDebug("Help information displayed\n")
 	case "/exit", "/quit":
 		// These are handled in the runREPL function
@@ -668,4 +688,31 @@ func closeDebugLog() {
 		debugLogFile.Close()
 		debugLogFile = nil
 	}
+}
+
+// displayHelp shows all available commands and options
+func displayHelp() {
+	fmt.Println("NCA - Nano Code Agent")
+	fmt.Printf("Version: %s, Build time: %s, Commit hash: %s\n\n", Version, BuildTime, CommitHash)
+
+	fmt.Println("USAGE:")
+	fmt.Println("  nca [options] [prompt]")
+	fmt.Println("  nca [command]")
+
+	fmt.Println("\nCOMMANDS:")
+	fmt.Println("  help    - Display this help information")
+	fmt.Println("  config  - Manage configuration settings")
+	fmt.Println("           Usage: nca config [set|unset|list] [--global] [key] [value]")
+	fmt.Println("  commit  - Automatically commit all current changes, and summarize the changes")
+
+	fmt.Println("\nOPTIONS:")
+	fmt.Println("  -p      - Run a one-time query and exit")
+	fmt.Println("  -v      - Show version information")
+	fmt.Println("  -debug  - Enable debug mode to log conversation data")
+
+	fmt.Println("\nINTERACTIVE COMMANDS:")
+	fmt.Println("  /clear  - Clear conversation history")
+	fmt.Println("  /exit   - Exit the program")
+	fmt.Println("  /quit   - Exit the program")
+	fmt.Println("  /help   - Show help information")
 }
