@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/pederhe/nca/utils"
 )
 
 // ExecuteCommand executes a command line command
@@ -20,7 +22,7 @@ func ExecuteCommand(params map[string]interface{}) string {
 
 	requiresApproval, _ := params["requires_approval"].(bool)
 	if requiresApproval {
-		fmt.Printf("Need to execute command: %s%s%s\nContinue? (y/n): ", ColorYellow, command, ColorReset)
+		fmt.Printf("Need to execute command: %s%s%s\nContinue? (y/n): ", utils.ColorYellow, command, utils.ColorReset)
 		var response string
 		fmt.Scanln(&response)
 		if strings.ToLower(response) != "y" {
