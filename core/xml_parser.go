@@ -7,32 +7,6 @@ import (
 
 // ParseToolUse parses tool use request from AI response
 func ParseToolUse(content string) map[string]interface{} {
-	// Check for attempt_completion first as a special case
-	attemptCompletionRegex := regexp.MustCompile(`<attempt_completion>([\s\S]*?)</attempt_completion>`)
-	attemptCompletionMatch := attemptCompletionRegex.FindStringSubmatch(content)
-	if len(attemptCompletionMatch) > 0 {
-		// Extract result content if available
-		resultRegex := regexp.MustCompile(`<result>([\s\S]*?)</result>`)
-		resultMatch := resultRegex.FindStringSubmatch(content)
-
-		params := map[string]interface{}{
-			"tool": "attempt_completion",
-		}
-
-		if len(resultMatch) > 1 {
-			params["result"] = resultMatch[1]
-		}
-
-		// Extract command if available
-		commandRegex := regexp.MustCompile(`<command>([\s\S]*?)</command>`)
-		commandMatch := commandRegex.FindStringSubmatch(content)
-		if len(commandMatch) > 1 {
-			params["command"] = commandMatch[1]
-		}
-
-		return params
-	}
-
 	// Find the first tool tag
 	toolNameRegex := regexp.MustCompile(`<([a-zA-Z_]+)>\s*`)
 	toolNameMatch := toolNameRegex.FindStringSubmatch(content)
@@ -41,11 +15,6 @@ func ParseToolUse(content string) map[string]interface{} {
 	}
 
 	toolName := toolNameMatch[1]
-
-	// Skip if it's attempt_completion (already handled above)
-	if toolName == "attempt_completion" {
-		return nil
-	}
 
 	// Extract the entire tool block
 	toolBlockRegex := regexp.MustCompile(`<` + toolName + `>([\s\S]*?)</` + toolName + `>`)
@@ -136,6 +105,21 @@ func ParseToolUse(content string) map[string]interface{} {
 		filePatternMatch := regexp.MustCompile(`<file_pattern>([\s\S]*?)</file_pattern>`).FindStringSubmatch(toolBlock)
 		if len(filePatternMatch) > 1 {
 			params["file_pattern"] = strings.TrimSpace(filePatternMatch[1])
+		}
+
+	case "attempt_completion":
+		// Extract result content if available
+		resultRegex := regexp.MustCompile(`<r>([\s\S]*?)</r>`)
+		resultMatch := resultRegex.FindStringSubmatch(toolBlock)
+		if len(resultMatch) > 1 {
+			params["result"] = resultMatch[1]
+		}
+
+		// Extract command if available
+		commandRegex := regexp.MustCompile(`<command>([\s\S]*?)</command>`)
+		commandMatch := commandRegex.FindStringSubmatch(toolBlock)
+		if len(commandMatch) > 1 {
+			params["command"] = commandMatch[1]
 		}
 	}
 
