@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,7 +35,16 @@ var (
 	debugLogPath string
 )
 
+// Add a global variable to cancel API requests
+var (
+	currentRequestCancel context.CancelFunc
+	// Flag indicating whether an API request is being processed
+	isProcessingAPIRequest bool
+)
+
 func main() {
+	// No longer initialize signal handling here, let the readline library handle signals
+
 	// Set custom usage function for flag package
 	flag.Usage = func() {
 		displayHelp()
@@ -239,7 +250,17 @@ func runREPL(initialPrompt string) {
 		readline.PcItem("/quit"),
 	)
 
-	// Initialize readline with custom config
+	// Create a custom interrupt handler
+	interruptHandler := func() {
+		if isProcessingAPIRequest && currentRequestCancel != nil {
+			// If an API request is in progress, cancel it
+			logDebug("Cancelling current API request due to interrupt\n")
+			currentRequestCancel()
+			fmt.Println("\nAPI request cancelled")
+		}
+	}
+
+	// Initialize readline configuration
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:            utils.ColorPurple + ">>> " + utils.ColorReset,
 		HistoryFile:       os.Getenv("HOME") + "/.nca_history",
@@ -254,6 +275,17 @@ func runREPL(initialPrompt string) {
 		return
 	}
 	defer rl.Close()
+
+	// Set up signal handling
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt)
+
+	// Start signal handling goroutine
+	go func() {
+		for range signalChan {
+			interruptHandler()
+		}
+	}()
 
 	for {
 		// Read input using readline
@@ -293,6 +325,10 @@ func runREPL(initialPrompt string) {
 
 		handlePrompt(input, &conversation)
 	}
+
+	// Clean up signal handling
+	signal.Stop(signalChan)
+	close(signalChan)
 }
 
 // Run one-off query
@@ -302,7 +338,32 @@ func runOneOffQuery(prompt string) {
 	logDebug("Running one-off query mode\n")
 	logDebug(fmt.Sprintf("Query: %s\n", prompt))
 
+	// Set up signal handling
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt)
+
+	// Create a custom interrupt handler
+	interruptHandler := func() {
+		if isProcessingAPIRequest && currentRequestCancel != nil {
+			// If an API request is in progress, cancel it
+			logDebug("Cancelling current API request due to interrupt\n")
+			currentRequestCancel()
+			fmt.Println("\nAPI request cancelled")
+		}
+	}
+
+	// Start signal handling goroutine
+	go func() {
+		for range signalChan {
+			interruptHandler()
+		}
+	}()
+
 	handlePrompt(prompt, &conversation)
+
+	// Clean up signal handling
+	signal.Stop(signalChan)
+	close(signalChan)
 
 	logDebug("One-off query completed\n")
 }
@@ -523,6 +584,23 @@ type APIResponse struct {
 
 // Call AI API
 func callAPI(conversation []map[string]string) (APIResponse, error) {
+	// Set flag indicating an API request is being processed
+	isProcessingAPIRequest = true
+
+	// Ensure the flag is cleared when the function returns
+	defer func() {
+		isProcessingAPIRequest = false
+	}()
+
+	// Create a cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+	// Save the cancel function to the global variable so it can be called from elsewhere
+	currentRequestCancel = cancel
+	// Ensure the cancel function is cleared when the function returns
+	defer func() {
+		currentRequestCancel = nil
+	}()
+
 	// Build system prompt
 	systemPrompt, err := core.BuildSystemPrompt()
 	if err != nil {
@@ -576,39 +654,85 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	var animationStopped bool = false
 	var startReasoning bool = false
 
-	// Define callback function for streaming
-	callback := func(reasoningChunk string, chunk string, isDone bool) {
-		// Stop loading animation when first response chunk is received
-		if (len(reasoningChunk) > 0 || len(chunk) > 0) && !animationStopped {
-			stopLoading <- true
-			<-animationDone // Wait for animation to actually stop
-			animationStopped = true
+	// Create a channel to receive API response results
+	resultCh := make(chan struct {
+		reasoningContent string
+		content          string
+		err              error
+	}, 1)
+
+	// Call the API in a goroutine so it can be cancelled via the context
+	go func() {
+		// Define callback function for streaming
+		callback := func(reasoningChunk string, chunk string, isDone bool) {
+			// Check if the context has been cancelled
+			select {
+			case <-ctx.Done():
+				return // If the context has been cancelled, don't process the callback
+			default:
+				// Continue normal processing
+			}
+
+			// Stop loading animation when first response chunk is received
+			if (len(reasoningChunk) > 0 || len(chunk) > 0) && !animationStopped {
+				stopLoading <- true
+				<-animationDone // Wait for animation to actually stop
+				animationStopped = true
+			}
+
+			if reasoningChunk != "" {
+				if !startReasoning {
+					startReasoning = true
+					fmt.Println(utils.ColorBlue + "Reasoning:" + utils.ColorReset)
+				}
+				fmt.Print(reasoningChunk)
+			} else if chunk != "" {
+				if startReasoning {
+					fmt.Println(utils.ColorBlue + "\n----------------------------" + utils.ColorReset)
+					startReasoning = false
+				}
+				// Filter and print the chunk
+				filtered := filter.ProcessChunk(chunk)
+				fmt.Print(filtered)
+			}
 		}
 
-		if reasoningChunk != "" {
-			if !startReasoning {
-				startReasoning = true
-				fmt.Println(utils.ColorBlue + "Reasoning:" + utils.ColorReset)
-			}
-			fmt.Print(reasoningChunk)
-		} else if chunk != "" {
-			if startReasoning {
-				fmt.Println(utils.ColorBlue + "\n----------------------------" + utils.ColorReset)
-				startReasoning = false
-			}
-			// Filter and print the chunk
-			filtered := filter.ProcessChunk(chunk)
-			fmt.Print(filtered)
-		}
+		// Call API with streaming, passing the context
+		reasoningContent, content, err := client.ChatStream(ctx, messages, callback)
+
+		// Send the result to the channel
+		resultCh <- struct {
+			reasoningContent string
+			content          string
+			err              error
+		}{reasoningContent, content, err}
+	}()
+
+	// Wait for the API call to complete or the context to be cancelled
+	var reasoningContent, content string
+	var apiErr error
+
+	select {
+	case <-ctx.Done():
+		// Context was cancelled (user pressed Ctrl+C)
+		logDebug("API request cancelled by user\n")
+		apiErr = fmt.Errorf("request cancelled by user")
+	case result := <-resultCh:
+		// API call completed
+		reasoningContent = result.reasoningContent
+		content = result.content
+		apiErr = result.err
 	}
 
-	// Call API with streaming
-	reasoningContent, content, err := client.ChatStream(messages, callback)
 	fmt.Println() // Add newline after streaming completes
 
 	// Log raw response in debug mode
-	logDebug(fmt.Sprintf("RAW API RESPONSE STREAM:\n%s\n%s\n%s\n",
-		reasoningContent, "--------------------------------", content))
+	if apiErr == nil {
+		logDebug(fmt.Sprintf("RAW API RESPONSE STREAM:\n%s\n%s\n%s\n",
+			reasoningContent, "--------------------------------", content))
+	} else {
+		logDebug(fmt.Sprintf("API REQUEST CANCELLED OR ERROR: %s\n", apiErr))
+	}
 
 	// Ensure loading animation is stopped
 	if !animationStopped {
@@ -616,14 +740,10 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 		<-animationDone
 	}
 
-	if err != nil {
-		logDebug(fmt.Sprintf("API STREAM ERROR: %s\n", err))
-		return APIResponse{}, fmt.Errorf("API call error: %s", err)
+	if apiErr != nil {
+		logDebug(fmt.Sprintf("API STREAM ERROR: %s\n", apiErr))
+		return APIResponse{}, fmt.Errorf("API call error: %s", apiErr)
 	}
-
-	// Remove <thinking></thinking> tags from the response
-	//cleanedContent := core.RemoveThinkingTags(content)
-	// The thinking tags here are the AI's thought process, not reasoning process, so we're not removing them yet
 
 	return APIResponse{
 		ReasoningContent: reasoningContent,

@@ -1,6 +1,10 @@
 package api
 
-import "github.com/pederhe/nca/api/types"
+import (
+	"context"
+
+	"github.com/pederhe/nca/api/types"
+)
 
 // Client is a wrapper around the AI provider
 type Client struct {
@@ -32,6 +36,6 @@ func NewClientWithProvider(providerType ProviderType) (*Client, error) {
 }
 
 // ChatStream sends a streaming conversation request to the AI API
-func (c *Client) ChatStream(messages []types.Message, callback func(string, string, bool)) (string, string, error) {
-	return c.provider.ChatStream(messages, callback)
+func (c *Client) ChatStream(ctx context.Context, messages []types.Message, callback func(string, string, bool)) (string, string, error) {
+	return c.provider.ChatStream(ctx, messages, callback)
 }

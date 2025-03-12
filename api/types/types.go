@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Message represents a message in a conversation
 type Message struct {
@@ -12,7 +15,8 @@ type Message struct {
 type Provider interface {
 	// ChatStream sends a streaming conversation request to the AI API
 	// It calls the callback function for each chunk of the response
-	ChatStream(messages []Message, callback func(string, string, bool)) (string, string, error)
+	// The context parameter allows for cancellation of the request
+	ChatStream(ctx context.Context, messages []Message, callback func(string, string, bool)) (string, string, error)
 
 	// GetName returns the name of the provider
 	GetName() string

@@ -3,6 +3,7 @@ package providers
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -78,7 +79,7 @@ func (p *DeepSeekProvider) GetName() string {
 }
 
 // ChatStream sends a streaming conversation request to the DeepSeek API
-func (p *DeepSeekProvider) ChatStream(messages []types.Message, callback func(string, string, bool)) (string, string, error) {
+func (p *DeepSeekProvider) ChatStream(ctx context.Context, messages []types.Message, callback func(string, string, bool)) (string, string, error) {
 	if p.apiKey == "" {
 		return "", "", fmt.Errorf("API key not set for DeepSeek provider")
 	}
@@ -95,7 +96,8 @@ func (p *DeepSeekProvider) ChatStream(messages []types.Message, callback func(st
 		return "", "", err
 	}
 
-	req, err := http.NewRequest("POST", p.apiBaseURL+"/chat/completions", bytes.NewBuffer(jsonData))
+	// Create request with context
+	req, err := http.NewRequestWithContext(ctx, "POST", p.apiBaseURL+"/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", "", err
 	}
@@ -121,6 +123,10 @@ func (p *DeepSeekProvider) ChatStream(messages []types.Message, callback func(st
 
 	resp, err := streamClient.Do(req)
 	if err != nil {
+		// Check if the error is due to context cancellation
+		if ctx.Err() != nil {
+			return "", "", ctx.Err()
+		}
 		return "", "", err
 	}
 	defer resp.Body.Close()
@@ -134,11 +140,38 @@ func (p *DeepSeekProvider) ChatStream(messages []types.Message, callback func(st
 	var fullContent strings.Builder
 	var fullReasoningContent strings.Builder
 
+	// Create a channel for handling context cancellation
+	done := make(chan struct{})
+	defer close(done)
+
+	// Monitor context cancellation in a goroutine
+	go func() {
+		select {
+		case <-ctx.Done():
+			// Context was cancelled, close the response body
+			resp.Body.Close()
+		case <-done:
+			// Normal completion, do nothing
+		}
+	}()
+
 	for {
+		// Check if context has been cancelled
+		select {
+		case <-ctx.Done():
+			return fullReasoningContent.String(), fullContent.String(), ctx.Err()
+		default:
+			// Continue processing
+		}
+
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
 				break
+			}
+			// Check if the error is due to context cancellation
+			if ctx.Err() != nil {
+				return fullReasoningContent.String(), fullContent.String(), ctx.Err()
 			}
 			return fullReasoningContent.String(), fullContent.String(), err
 		}
