@@ -919,6 +919,12 @@ func displayHelp() {
 	fmt.Println("  nca [options] [prompt]")
 	fmt.Println("  nca [command]")
 
+	fmt.Println("\nPROMPT FEATURES:")
+	fmt.Println("  File Reading   - Include file content by wrapping the path in backticks: `path/to/file.txt`")
+	fmt.Println("  Web Content    - Include web content by wrapping the URL in backticks: `https://example.com`")
+	fmt.Println("  Multiple Files - You can include multiple files or URLs in the same prompt")
+	fmt.Println("  Size Limits    - Files are limited to 64KB, web content is filtered to extract text")
+
 	fmt.Println("\nCOMMANDS:")
 	fmt.Println("  help    - Display this help information")
 	fmt.Println("  config  - Manage configuration settings")
