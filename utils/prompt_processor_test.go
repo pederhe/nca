@@ -24,6 +24,14 @@ func TestProcessPrompt(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
+	// Create a binary test file
+	binaryFilePath := filepath.Join(tempDir, "binary.bin")
+	binaryContent := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+	err = os.WriteFile(binaryFilePath, binaryContent, 0644)
+	if err != nil {
+		t.Fatalf("Failed to create binary test file: %v", err)
+	}
+
 	// Setup test HTTP server
 	server := setupTestServer()
 	defer server.Close()
@@ -58,6 +66,13 @@ func TestProcessPrompt(t *testing.T) {
 			expectError:      true,
 		},
 		{
+			name:             "Contains binary file path",
+			prompt:           "Please read this file: `" + binaryFilePath + "`",
+			shouldContain:    []string{},
+			shouldNotContain: []string{},
+			expectError:      true,
+		},
+		{
 			name:             "Contains URL to plain HTML",
 			prompt:           "Please check this URL: `" + server.URL + "/plain`",
 			shouldContain:    []string{"Test HTML Content", "This is a test paragraph"},
@@ -77,6 +92,13 @@ func TestProcessPrompt(t *testing.T) {
 			shouldContain:    []string{"Brotli HTML Content", "This is a brotli compressed paragraph"},
 			shouldNotContain: []string{},
 			expectError:      false,
+		},
+		{
+			name:             "Contains URL to binary content",
+			prompt:           "Please check this URL: `" + server.URL + "/binary`",
+			shouldContain:    []string{},
+			shouldNotContain: []string{},
+			expectError:      true,
 		},
 	}
 
@@ -240,6 +262,119 @@ func TestExtractText(t *testing.T) {
 	}
 }
 
+// TestIsBinaryFile tests the isBinaryFile function
+func TestIsBinaryFile(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  []byte
+		expected bool
+	}{
+		{
+			name:     "Text file",
+			content:  []byte("This is a text file with normal content."),
+			expected: false,
+		},
+		{
+			name:     "Text file with special characters",
+			content:  []byte("This is a text file with special characters: !@#$%^&*()_+"),
+			expected: false,
+		},
+		{
+			name:     "Text file with newlines and tabs",
+			content:  []byte("This is a text file with\nnewlines and\ttabs."),
+			expected: false,
+		},
+		{
+			name:     "Binary file with NUL bytes",
+			content:  []byte{84, 104, 105, 115, 0, 105, 115, 32, 98, 105, 110, 97, 114, 121},
+			expected: true,
+		},
+		{
+			name:     "Binary file with many non-printable characters",
+			content:  []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isBinaryFile(tt.content)
+			if result != tt.expected {
+				t.Errorf("isBinaryFile() = %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestIsBinaryContentType tests the isBinaryContentType function
+func TestIsBinaryContentType(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		expected    bool
+	}{
+		{
+			name:        "Text/HTML",
+			contentType: "text/html; charset=utf-8",
+			expected:    false,
+		},
+		{
+			name:        "Text/Plain",
+			contentType: "text/plain",
+			expected:    false,
+		},
+		{
+			name:        "Application/JSON",
+			contentType: "application/json",
+			expected:    false,
+		},
+		{
+			name:        "Application/XML",
+			contentType: "application/xml",
+			expected:    false,
+		},
+		{
+			name:        "Application/Octet-Stream",
+			contentType: "application/octet-stream",
+			expected:    true,
+		},
+		{
+			name:        "Image/JPEG",
+			contentType: "image/jpeg",
+			expected:    true,
+		},
+		{
+			name:        "Audio/MP3",
+			contentType: "audio/mpeg",
+			expected:    true,
+		},
+		{
+			name:        "Video/MP4",
+			contentType: "video/mp4",
+			expected:    true,
+		},
+		{
+			name:        "Application/PDF",
+			contentType: "application/pdf",
+			expected:    true,
+		},
+		{
+			name:        "Application/ZIP",
+			contentType: "application/zip",
+			expected:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isBinaryContentType(tt.contentType)
+			if result != tt.expected {
+				t.Errorf("isBinaryContentType() = %v, expected %v for content type %s", result, tt.expected, tt.contentType)
+			}
+		})
+	}
+}
+
 // setupTestServer creates a test HTTP server that serves different types of content
 func setupTestServer() *httptest.Server {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -316,6 +451,17 @@ func setupTestServer() *httptest.Server {
 			`))
 			brotliWriter.Close()
 			w.Write(buf.Bytes())
+
+		case "/binary":
+			// Serve binary content
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			// Create some binary data
+			binaryData := make([]byte, 256)
+			for i := 0; i < 256; i++ {
+				binaryData[i] = byte(i)
+			}
+			w.Write(binaryData)
 
 		default:
 			w.WriteHeader(http.StatusNotFound)

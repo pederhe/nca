@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -97,7 +98,44 @@ func readFileContent(filePath string) (string, error) {
 		return "", err
 	}
 
+	// Check if the file is binary
+	if isBinaryFile(content) {
+		return "", fmt.Errorf("cannot process binary file: %s", absPath)
+	}
+
 	return string(content), nil
+}
+
+// isBinaryFile checks if the content appears to be a binary file
+// It uses a simple heuristic: if the content contains NUL bytes or too many non-printable characters, it's considered binary
+func isBinaryFile(content []byte) bool {
+	// If the content contains NUL bytes, it's definitely binary
+	if bytes.Contains(content, []byte{0}) {
+		return true
+	}
+
+	// Check the first 512 bytes (or less if the file is smaller)
+	checkSize := 512
+	if len(content) < checkSize {
+		checkSize = len(content)
+	}
+
+	// Count non-printable, non-whitespace characters
+	nonPrintableCount := 0
+	for i := 0; i < checkSize; i++ {
+		c := content[i]
+		// Skip common whitespace characters
+		if c == '\n' || c == '\r' || c == '\t' || c == ' ' {
+			continue
+		}
+		// Count non-printable characters
+		if c < 32 || c > 126 {
+			nonPrintableCount++
+		}
+	}
+
+	// If more than 30% of the first 512 bytes are non-printable, consider it binary
+	return nonPrintableCount > checkSize*30/100
 }
 
 // FetchWebContent gets web content and filters HTML tags
@@ -162,6 +200,12 @@ func FetchWebContent(urlStr string) (string, error) {
 		return "", fmt.Errorf("HTTP request failed, status code: %d", resp.StatusCode)
 	}
 
+	// Check content type to avoid binary files
+	contentType := resp.Header.Get("Content-Type")
+	if isBinaryContentType(contentType) {
+		return "", fmt.Errorf("cannot process binary content type: %s", contentType)
+	}
+
 	// Handle compressed content
 	var reader io.Reader
 	switch resp.Header.Get("Content-Encoding") {
@@ -177,8 +221,24 @@ func FetchWebContent(urlStr string) (string, error) {
 		reader = resp.Body
 	}
 
+	// Read the first part of the content to check if it's binary
+	previewBuffer := make([]byte, 512)
+	n, err := reader.Read(previewBuffer)
+	if err != nil && err != io.EOF {
+		return "", fmt.Errorf("failed to read content preview: %v", err)
+	}
+	previewBuffer = previewBuffer[:n]
+
+	// Check if content appears to be binary
+	if isBinaryFile(previewBuffer) {
+		return "", fmt.Errorf("cannot process binary content from URL: %s", urlStr)
+	}
+
+	// Create a new reader that combines the preview and the rest of the content
+	combinedReader := io.MultiReader(bytes.NewReader(previewBuffer), reader)
+
 	// Parse HTML
-	doc, err := html.Parse(reader)
+	doc, err := html.Parse(combinedReader)
 	if err != nil {
 		return "", err
 	}
@@ -191,6 +251,41 @@ func FetchWebContent(urlStr string) (string, error) {
 	result := cleanText(textContent.String())
 
 	return result, nil
+}
+
+// isBinaryContentType checks if the content type indicates binary data
+func isBinaryContentType(contentType string) bool {
+	// Convert to lowercase for case-insensitive comparison
+	contentType = strings.ToLower(contentType)
+
+	// List of common binary content types
+	binaryTypes := []string{
+		"application/octet-stream",
+		"application/pdf",
+		"application/zip",
+		"application/gzip",
+		"application/x-tar",
+		"application/x-rar-compressed",
+		"application/x-7z-compressed",
+		"application/x-msdownload",
+		"application/x-executable",
+		"application/x-shockwave-flash",
+		"image/",                          // All image types
+		"audio/",                          // All audio types
+		"video/",                          // All video types
+		"font/",                           // All font types
+		"application/vnd.ms-",             // MS Office formats
+		"application/vnd.openxmlformats-", // MS Office formats
+	}
+
+	// Check if content type matches any binary type
+	for _, binaryType := range binaryTypes {
+		if strings.HasPrefix(contentType, binaryType) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // extractText recursively extracts text content from HTML nodes
