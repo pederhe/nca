@@ -520,3 +520,31 @@ func GitCommit(params map[string]interface{}) string {
 
 	return fmt.Sprintf("Successfully committed changes with message: %s", commitMessage)
 }
+
+// FetchWebContent fetches the content of a web page
+func FetchWebContent(params map[string]interface{}) string {
+	url, ok := params["url"].(string)
+	if !ok || url == "" {
+		return "Error: Missing or empty URL parameter"
+	}
+
+	// Validate URL format
+	if !utils.IsURL(url) {
+		return fmt.Sprintf("Error: Invalid URL format: %s", url)
+	}
+
+	fmt.Printf("Fetching web content from: %s%s%s\n", utils.ColorYellow, url, utils.ColorReset)
+
+	// Fetch web content
+	content, err := utils.FetchWebContent(url)
+	if err != nil {
+		return fmt.Sprintf("Error fetching web content: %s", err)
+	}
+
+	// Format the result
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Web content from %s:\n\n", url))
+	result.WriteString(content)
+
+	return result.String()
+}

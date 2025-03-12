@@ -842,6 +842,8 @@ func handleToolUse(toolUse map[string]interface{}) string {
 		return core.PlanModeResponse(toolUse)
 	case "git_commit":
 		return core.GitCommit(toolUse)
+	case "fetch_web_content":
+		return core.FetchWebContent(toolUse)
 	default:
 		return fmt.Sprintf("Error: Unknown tool '%s'", toolName)
 	}

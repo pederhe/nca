@@ -21,6 +21,7 @@ func ParseToolUse(content string) map[string]interface{} {
 		"ask_followup_question",
 		"plan_mode_response",
 		"git_commit",
+		"fetch_web_content",
 	}
 
 	// Find all root tool tags
@@ -168,6 +169,12 @@ func ParseToolUse(content string) map[string]interface{} {
 		filePatternMatch := regexp.MustCompile(`<file_pattern>([\s\S]*?)</file_pattern>`).FindStringSubmatch(toolBlock)
 		if len(filePatternMatch) > 1 {
 			params["file_pattern"] = strings.TrimSpace(filePatternMatch[1])
+		}
+
+	case "fetch_web_content":
+		urlMatch := regexp.MustCompile(`<url>([\s\S]*?)</url>`).FindStringSubmatch(toolBlock)
+		if len(urlMatch) > 1 {
+			params["url"] = strings.TrimSpace(urlMatch[1])
 		}
 
 	case "attempt_completion":

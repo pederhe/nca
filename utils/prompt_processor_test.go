@@ -113,7 +113,7 @@ func TestProcessPrompt(t *testing.T) {
 	}
 }
 
-// TestFetchWebContent tests the fetchWebContent function directly
+// TestFetchWebContent tests the FetchWebContent function directly
 func TestFetchWebContent(t *testing.T) {
 	// Setup test HTTP server
 	server := setupTestServer()
@@ -161,11 +161,11 @@ func TestFetchWebContent(t *testing.T) {
 	// Run tests
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := fetchWebContent(tt.url)
+			result, err := FetchWebContent(tt.url)
 
 			// Check for errors
 			if (err != nil) != tt.expectError {
-				t.Errorf("fetchWebContent() error = %v, expected error = %v", err, tt.expectError)
+				t.Errorf("FetchWebContent() error = %v, expected error = %v", err, tt.expectError)
 				return
 			}
 
@@ -177,7 +177,7 @@ func TestFetchWebContent(t *testing.T) {
 			// Check that result contains all required strings
 			for _, str := range tt.shouldContain {
 				if !strings.Contains(result, str) {
-					t.Errorf("fetchWebContent() result does not contain expected string: %v", str)
+					t.Errorf("FetchWebContent() result does not contain expected string: %v", str)
 				}
 			}
 		})

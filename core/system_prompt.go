@@ -218,6 +218,15 @@ src/services/authService.js
 </files>
 </git_commit>
 
+## fetch_web_content
+Description: Request to fetch the contents of a web page at the specified URL. Use this when you need to examine the contents of an existing web page you do not know the contents of, for example to get latest news, weather, stock prices, or other information.
+Parameters:
+- url: (required) The URL of the web page to read
+Usage:
+<fetch_web_content>
+<url>https://example.com</url>
+</fetch_web_content>
+
 # Tool Use Examples
 
 ## Example 1: Requesting to execute a command

@@ -41,9 +41,9 @@ func ProcessPrompt(prompt string) (string, error) {
 		var err error
 
 		// Determine if the content is a file path or URL
-		if isURL(content) {
+		if IsURL(content) {
 			// Process URL
-			appendContent, err = fetchWebContent(content)
+			appendContent, err = FetchWebContent(content)
 			if err != nil {
 				return "", fmt.Errorf("failed to fetch web content: %v", err)
 			}
@@ -72,8 +72,8 @@ func HasBackticks(prompt string) bool {
 	return len(matches) > 0
 }
 
-// isURL determines if a string is a URL
-func isURL(str string) bool {
+// IsURL determines if a string is a URL
+func IsURL(str string) bool {
 	u, err := url.Parse(str)
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
@@ -100,8 +100,8 @@ func readFileContent(filePath string) (string, error) {
 	return string(content), nil
 }
 
-// fetchWebContent gets web content and filters HTML tags
-func fetchWebContent(urlStr string) (string, error) {
+// FetchWebContent gets web content and filters HTML tags
+func FetchWebContent(urlStr string) (string, error) {
 	// Create a cookie jar
 	jar, err := cookiejar.New(nil)
 	if err != nil {

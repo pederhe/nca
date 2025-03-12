@@ -311,6 +311,10 @@ func toolTagPrefix(tool string, tag string) string {
 		if tag == "message" {
 			return "Git commit:\n"
 		}
+	case "fetch_web_content":
+		if tag == "url" {
+			return "Fetch web content: "
+		}
 	}
 	return ""
 }
@@ -329,6 +333,7 @@ func isToolTag(tag string) bool {
 		"ask_followup_question",
 		"plan_mode_response",
 		"git_commit",
+		"fetch_web_content",
 	}
 
 	for _, toolTag := range toolTags {
