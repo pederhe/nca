@@ -369,6 +369,22 @@ func runOneOffQuery(prompt string) {
 
 // Handle user input prompt
 func handlePrompt(prompt string, conversation *[]map[string]string) {
+	// Check if the prompt contains files or URLs to be processed
+	// This helps users understand that their files or URLs are being processed
+	if utils.HasBackticks(prompt) {
+		fmt.Print("\nProcessing resources in prompt... ")
+		logDebug("Detected backticks in prompt, processing resources\n")
+
+		newPrompt, err := utils.ProcessPrompt(prompt)
+		if err != nil {
+			fmt.Println(utils.ColorRed + "Error processing prompt: " + err.Error() + utils.ColorReset)
+			return
+		}
+		prompt = newPrompt
+		fmt.Println("Done")
+		fmt.Println()
+	}
+
 	// Add user message to conversation history
 	*conversation = append(*conversation, map[string]string{
 		"role":    "user",
