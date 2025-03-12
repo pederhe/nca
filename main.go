@@ -114,9 +114,19 @@ func main() {
 		} else {
 			initialPrompt = initialPrompt + "\n\n" + string(content)
 		}
+
+		// When pipe input is detected, automatically run in one-time query mode
+		if initialPrompt == "" {
+			fmt.Println("Error: Empty pipe input")
+			logDebug("Error: Empty pipe input\n")
+			return
+		}
+		logDebug(fmt.Sprintf("Running one-time query mode with pipe input: %s\n", initialPrompt))
+		runOneOffQuery(initialPrompt)
+		return
 	}
 
-	// Run REPL or one-off query
+	// Run REPL or one-off query (only reached if no pipe input)
 	if *promptFlag {
 		if initialPrompt == "" {
 			fmt.Println("Error: No prompt provided for one-time query")
@@ -381,6 +391,9 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			// Add tool result to conversation history with description
 			// The last tool result of a task is not recorded, as models like DeepSeek-R1 don't support consecutive user messages
 			toolResultContent := fmt.Sprintf("%s Result:\n%s", toolDesc, result)
+			if _, exists := toolUse["has_multiple_tools"]; exists {
+				toolResultContent += "\n\nOnly one tool may be used per message. You must assess the first tool's result before proceeding to use the next tool."
+			}
 			*conversation = append(*conversation, map[string]string{
 				"role":    "user",
 				"content": toolResultContent,
@@ -594,7 +607,8 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	fmt.Println() // Add newline after streaming completes
 
 	// Log raw response in debug mode
-	logDebug(fmt.Sprintf("RAW API RESPONSE STREAM:\n%s\n%s\n", reasoningContent, content))
+	logDebug(fmt.Sprintf("RAW API RESPONSE STREAM:\n%s\n%s\n%s\n",
+		reasoningContent, "--------------------------------", content))
 
 	// Ensure loading animation is stopped
 	if !animationStopped {

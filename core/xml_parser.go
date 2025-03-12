@@ -2,32 +2,95 @@ package core
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 )
 
 // ParseToolUse parses tool use request from AI response
 func ParseToolUse(content string) map[string]interface{} {
+	// Define the list of root tool tags
+	rootTools := []string{
+		"execute_command",
+		"read_file",
+		"write_to_file",
+		"replace_in_file",
+		"search_files",
+		"list_files",
+		"list_code_definition_names",
+		"attempt_completion",
+		"ask_followup_question",
+		"plan_mode_response",
+		"git_commit",
+	}
+
+	// Find all root tool tags
+	var allToolMatches []struct {
+		toolName string
+		match    string
+		position int
+	}
+
+	for _, toolName := range rootTools {
+		// Create a complete start and end tag match for each tool name
+		fullTagRegex := regexp.MustCompile(`<` + toolName + `>[\s\S]*?</` + toolName + `>`)
+		matches := fullTagRegex.FindAllStringSubmatchIndex(content, -1)
+		for _, match := range matches {
+			if len(match) >= 2 {
+				matchText := content[match[0]:match[1]]
+				allToolMatches = append(allToolMatches, struct {
+					toolName string
+					match    string
+					position int
+				}{
+					toolName: toolName,
+					match:    matchText,
+					position: match[0],
+				})
+			}
+		}
+	}
+
+	// Sort tools by position
+	sort.Slice(allToolMatches, func(i, j int) bool {
+		return allToolMatches[i].position < allToolMatches[j].position
+	})
+
+	// Check if there are multiple tool uses
+	hasMultipleTools := len(allToolMatches) > 1
+
 	// Find the first tool tag
-	toolNameRegex := regexp.MustCompile(`<([a-zA-Z_]+)>\s*`)
-	toolNameMatch := toolNameRegex.FindStringSubmatch(content)
-	if len(toolNameMatch) < 2 {
+	var toolName string
+	var toolBlock string
+
+	if len(allToolMatches) > 0 {
+		toolName = allToolMatches[0].toolName
+
+		// Extract the entire tool block
+		toolBlockRegex := regexp.MustCompile(`<` + toolName + `>([\s\S]*?)</` + toolName + `>`)
+		toolBlockMatch := toolBlockRegex.FindStringSubmatch(allToolMatches[0].match)
+		if len(toolBlockMatch) < 2 {
+			return nil
+		}
+		toolBlock = toolBlockMatch[1]
+	} else {
+		// If no tool tags found, return nil
 		return nil
 	}
-
-	toolName := toolNameMatch[1]
-
-	// Extract the entire tool block
-	toolBlockRegex := regexp.MustCompile(`<` + toolName + `>([\s\S]*?)</` + toolName + `>`)
-	toolBlockMatch := toolBlockRegex.FindStringSubmatch(content)
-	if len(toolBlockMatch) < 2 {
-		return nil
-	}
-
-	toolBlock := toolBlockMatch[1]
 
 	// Parse parameters
 	params := map[string]interface{}{
 		"tool": toolName,
+	}
+
+	// Add flag for multiple tools detection
+	if hasMultipleTools {
+		// Extract all tool names for the warning message
+		var toolNames []string
+		for _, match := range allToolMatches {
+			toolNames = append(toolNames, match.toolName)
+		}
+		params["has_multiple_tools"] = true
+		params["detected_tools"] = strings.Join(toolNames, ", ")
 	}
 
 	// Find all parameters - using a more robust approach
@@ -128,7 +191,29 @@ func ParseToolUse(content string) map[string]interface{} {
 
 // RemoveThinkingTags removes content within <thinking></thinking> tags
 func RemoveThinkingTags(content string) string {
-	// Find and remove all <thinking>...</thinking> blocks
-	thinkingRegex := regexp.MustCompile(`<thinking>[\s\S]*?</thinking>`)
-	return thinkingRegex.ReplaceAllString(content, "")
+	// Use a more complex method to handle nested tags
+	// First find the outermost thinking tags
+	result := content
+
+	// Handle nested tags by removing from the innermost outward
+	// Repeatedly search and replace until no more thinking tags remain
+	for {
+		// Find the innermost thinking tags (thinking tags that don't contain other thinking tags)
+		innerThinkingRegex := regexp.MustCompile(`<thinking>[^<]*?</thinking>`)
+		if !innerThinkingRegex.MatchString(result) {
+			// If no innermost tags found, try to find thinking tags that may contain other content
+			outerThinkingRegex := regexp.MustCompile(`<thinking>[\s\S]*?</thinking>`)
+			if !outerThinkingRegex.MatchString(result) {
+				// If no thinking tags found at all, exit the loop
+				break
+			}
+			// Replace the found tags
+			result = outerThinkingRegex.ReplaceAllString(result, "")
+		} else {
+			// Replace the innermost tags found
+			result = innerThinkingRegex.ReplaceAllString(result, "")
+		}
+	}
+
+	return result
 }
