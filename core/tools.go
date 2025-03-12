@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/pederhe/nca/config"
 	"github.com/pederhe/nca/utils"
 )
 
@@ -21,8 +22,9 @@ func ExecuteCommand(params map[string]interface{}) string {
 		return "Error: Missing command parameter"
 	}
 
+	autoApprove := config.Get("auto_approve") == "true" || config.Get("auto_approve") == "1"
 	requiresApproval, _ := params["requires_approval"].(bool)
-	if requiresApproval {
+	if !autoApprove && requiresApproval {
 		fmt.Printf("Need to execute command: %s%s%s\nContinue? (y/n): ", utils.ColorYellow, command, utils.ColorReset)
 		var response string
 		fmt.Scanln(&response)
