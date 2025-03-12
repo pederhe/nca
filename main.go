@@ -247,7 +247,6 @@ func runREPL(initialPrompt string) {
 		),
 		readline.PcItem("/help"),
 		readline.PcItem("/exit"),
-		readline.PcItem("/quit"),
 	)
 
 	// Create a custom interrupt handler
@@ -314,9 +313,9 @@ func runREPL(initialPrompt string) {
 		// Handle slash command
 		if strings.HasPrefix(input, "/") {
 			logDebug(fmt.Sprintf("Slash command: %s\n", input))
-			if input == "/exit" || input == "/quit" {
+			if input == "/exit" {
 				fmt.Println("Exiting")
-				logDebug("User exited with /exit or /quit command\n")
+				logDebug("User exited with /exit command\n")
 				break
 			}
 			handleSlashCommand(input, &conversation)
@@ -557,6 +556,7 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 	case "/clear":
 		*conversation = []map[string]string{}
 		fmt.Println("Conversation history cleared")
+		fmt.Println(utils.ColorBlue + "----------------New Chat----------------" + utils.ColorReset)
 		logDebug("Conversation history cleared by user\n")
 	case "/help":
 		fmt.Println("\nINTERACTIVE COMMANDS:")
@@ -564,10 +564,9 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 		fmt.Println("  /config - Manage configuration settings")
 		fmt.Println("           Usage: /config [set|unset|list] [--global] [key] [value]")
 		fmt.Println("  /exit   - Exit the program")
-		fmt.Println("  /quit   - Exit the program")
 		fmt.Println("  /help   - Show help information")
 		logDebug("Help information displayed\n")
-	case "/exit", "/quit":
+	case "/exit":
 		// These are handled in the runREPL function
 		// Nothing to do here
 	default:
@@ -918,6 +917,5 @@ func displayHelp() {
 	fmt.Println("  /config - Manage configuration settings")
 	fmt.Println("           Usage: /config [set|unset|list] [--global] [key] [value]")
 	fmt.Println("  /exit   - Exit the program")
-	fmt.Println("  /quit   - Exit the program")
 	fmt.Println("  /help   - Show help information")
 }

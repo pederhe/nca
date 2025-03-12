@@ -29,11 +29,17 @@ func BuildSystemPrompt() (string, error) {
 	}
 	cwd = toPosix(cwd)
 
+	tree, err := utils.GetCurrentDirectoryTree(3)
+	if err != nil {
+		return "", err
+	}
+
 	data := map[string]interface{}{
 		"CWD":     cwd,
 		"Shell":   shell,
 		"OS":      osName,
 		"HomeDir": homeDir,
+		"CWDTree": tree,
 	}
 
 	prompt := `You are nca, a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices.
@@ -440,6 +446,8 @@ Operating System: {{.OS}}
 Default Shell: {{.Shell}}
 Home Directory: {{.HomeDir}}
 Current Working Directory: {{.CWD}}
+Current Working Directory Tree:
+{{.CWDTree}}
 
 ====
 
