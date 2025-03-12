@@ -153,6 +153,12 @@ func handleConfigCommand(args []string) {
 		}
 	}
 
+	// Check if there are any arguments left after removing the --global flag
+	if len(cmdArgs) == 0 {
+		fmt.Println("Usage: nca config [set|unset|list] [--global] [key] [value]")
+		return
+	}
+
 	switch cmdArgs[0] {
 	case "set":
 		if len(cmdArgs) < 3 {
@@ -212,6 +218,12 @@ func runREPL(initialPrompt string) {
 	// Create custom completer for commands
 	completer := readline.NewPrefixCompleter(
 		readline.PcItem("/clear"),
+		readline.PcItem("/config",
+			readline.PcItem("set"),
+			readline.PcItem("unset"),
+			readline.PcItem("list"),
+			readline.PcItem("--global"),
+		),
 		readline.PcItem("/help"),
 		readline.PcItem("/exit"),
 		readline.PcItem("/quit"),
@@ -367,7 +379,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			toolDesc := formatToolDescription(toolUse)
 
 			// Add tool result to conversation history with description
-			// 任务最后一个工具使用结果不记录，像DeepSeek-R1这样的模型不支持连续的user消息
+			// The last tool result of a task is not recorded, as models like DeepSeek-R1 don't support consecutive user messages
 			toolResultContent := fmt.Sprintf("%s Result:\n%s", toolDesc, result)
 			*conversation = append(*conversation, map[string]string{
 				"role":    "user",
@@ -453,6 +465,20 @@ func formatToolDescription(toolUse map[string]interface{}) string {
 
 // Handle slash command
 func handleSlashCommand(cmd string, conversation *[]map[string]string) {
+	// Handle /config command, format: "/config [set|unset|list] [--global] [key] [value]"
+	if strings.HasPrefix(cmd, "/config") {
+		args := strings.Fields(cmd)
+		if len(args) > 1 {
+			// Remove the "/config" prefix and pass the remaining arguments to handleConfigCommand
+			handleConfigCommand(args[1:])
+		} else {
+			// If there's only "/config" without other arguments, show usage
+			fmt.Println("Usage: /config [set|unset|list] [--global] [key] [value]")
+		}
+		logDebug(fmt.Sprintf("Config command executed in interactive mode: %s\n", cmd))
+		return
+	}
+
 	switch cmd {
 	case "/clear":
 		*conversation = []map[string]string{}
@@ -461,6 +487,8 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 	case "/help":
 		fmt.Println("\nINTERACTIVE COMMANDS:")
 		fmt.Println("  /clear  - Clear conversation history")
+		fmt.Println("  /config - Manage configuration settings")
+		fmt.Println("           Usage: /config [set|unset|list] [--global] [key] [value]")
 		fmt.Println("  /exit   - Exit the program")
 		fmt.Println("  /quit   - Exit the program")
 		fmt.Println("  /help   - Show help information")
@@ -753,6 +781,8 @@ func displayHelp() {
 
 	fmt.Println("\nINTERACTIVE COMMANDS:")
 	fmt.Println("  /clear  - Clear conversation history")
+	fmt.Println("  /config - Manage configuration settings")
+	fmt.Println("           Usage: /config [set|unset|list] [--global] [key] [value]")
 	fmt.Println("  /exit   - Exit the program")
 	fmt.Println("  /quit   - Exit the program")
 	fmt.Println("  /help   - Show help information")

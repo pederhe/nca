@@ -25,7 +25,7 @@ type ProviderConfig struct {
 	Model       string
 	Temperature float64
 	Timeout     time.Duration
-	// 是否为流式请求禁用超时
+	// Whether to disable timeout for streaming requests
 	DisableStreamTimeout bool
 }
 
@@ -33,5 +33,5 @@ type ProviderConfig struct {
 const DefaultTimeout = 120 * time.Second
 
 // StreamingTimeout is the timeout for streaming API requests
-// 使用更长的超时时间用于流式请求
+// Use a longer timeout for streaming requests
 const StreamingTimeout = 300 * time.Second

@@ -433,7 +433,7 @@ func extractDefinitions(content, ext string) []string {
 }
 
 func FollowupQuestion(params map[string]interface{}) string {
-	// 从工具使用中获取问题
+	// Get the question from the tool use parameters
 	question, ok := params["question"].(string)
 	if !ok || question == "" {
 		return "Error: No question provided for ask_followup_question tool"
@@ -442,15 +442,15 @@ func FollowupQuestion(params map[string]interface{}) string {
 	return ""
 }
 
-// PlanModeResponse 处理计划模式下的响应
+// PlanModeResponse handles responses in plan mode
 func PlanModeResponse(params map[string]interface{}) string {
-	// 从工具使用中获取响应内容
+	// Get the response content from the tool use parameters
 	response, ok := params["response"].(string)
 	if !ok || response == "" {
 		return "Error: No response provided for plan_mode_response tool"
 	}
 
-	return ""
+	return response
 }
 
 // GitCommit handles the git_commit tool functionality

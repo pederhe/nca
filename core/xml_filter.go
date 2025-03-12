@@ -198,9 +198,9 @@ func (f *XMLTagFilter) processTag(tag string) {
 
 // Process a closing tag
 func (f *XMLTagFilter) processClosingTag(tagName string) {
-	// 特殊处理thinking标签，不输出关闭标签
+	// Special handling for thinking tag: don't output closing tag
 	if tagName == "thinking" && len(f.tagStack) > 0 && f.tagStack[len(f.tagStack)-1] == "thinking" {
-		// 只从标签栈中移除，不做其他处理
+		// Just remove from tag stack without further processing
 		f.tagStack = f.tagStack[:len(f.tagStack)-1]
 		return
 	}
@@ -234,7 +234,7 @@ func (f *XMLTagFilter) processClosingTag(tagName string) {
 
 // Process an opening tag
 func (f *XMLTagFilter) processOpeningTag(tag string) {
-	// 特殊处理thinking标签，不输出开始标签，但仍然将其加入标签栈
+	// Special handling for thinking tag: don't output opening tag, but still add it to tag stack
 	if tag == "thinking" {
 		f.tagStack = append(f.tagStack, tag)
 		return

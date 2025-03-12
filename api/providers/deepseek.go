@@ -104,16 +104,16 @@ func (p *DeepSeekProvider) ChatStream(messages []types.Message, callback func(st
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	req.Header.Set("Accept", "text/event-stream")
 
-	// 为流式请求创建一个HTTP客户端
+	// Create an HTTP client for streaming requests
 	var streamClient *http.Client
 
 	if p.disableStreamTimeout {
-		// 无超时的HTTP客户端
+		// HTTP client without timeout
 		streamClient = &http.Client{
-			Timeout: 0, // 0表示无超时
+			Timeout: 0, // 0 means no timeout
 		}
 	} else {
-		// 使用较长的超时时间
+		// Use a longer timeout for streaming
 		streamClient = &http.Client{
 			Timeout: types.StreamingTimeout,
 		}

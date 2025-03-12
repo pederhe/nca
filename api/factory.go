@@ -32,7 +32,7 @@ func GetProvider(providerType ProviderType) (types.Provider, error) {
 		}
 	}
 
-	// 读取是否禁用流式请求超时的配置
+	// Read configuration for disabling stream timeout
 	disableStreamTimeoutStr := config.Get("disable_stream_timeout")
 	disableStreamTimeout := false
 	if disableStreamTimeoutStr == "true" || disableStreamTimeoutStr == "1" {
@@ -59,13 +59,13 @@ func GetProvider(providerType ProviderType) (types.Provider, error) {
 // GetDefaultProvider returns the default provider based on configuration
 func GetDefaultProvider() (types.Provider, error) {
 	providerName := ""
-	// 根据model匹配关键字来确定provider
+	// Determine provider based on model name keywords
 	model := config.Get("model")
 	if model != "" {
 		if strings.Contains(strings.ToLower(model), "deepseek") {
 			providerName = string(DeepSeekProvider)
 		}
-		// 可以在这里添加其他模型的匹配逻辑
+		// Additional model matching logic can be added here
 	}
 
 	if providerName == "" {
