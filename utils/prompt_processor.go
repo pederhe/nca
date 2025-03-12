@@ -92,6 +92,17 @@ func readFileContent(filePath string) (string, error) {
 		return "", fmt.Errorf("file does not exist: %s", absPath)
 	}
 
+	// Get file information
+	fileInfo, err := os.Stat(absPath)
+	if err != nil {
+		return "", err
+	}
+
+	// Check if file size exceeds 64KB (64 * 1024 = 65536 bytes)
+	if fileInfo.Size() > 65536 {
+		return "", fmt.Errorf("file too large (max 64KB): %s (%d bytes)", absPath, fileInfo.Size())
+	}
+
 	// Read file content
 	content, err := os.ReadFile(absPath)
 	if err != nil {
