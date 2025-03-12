@@ -299,8 +299,19 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 	// Count of consecutive responses without tool use
 	noToolUseCount := 0
 
+	// Message count limit
+	maxMessagesPerTask := 25
+
 	// Multi-step task processing loop
 	for {
+		// Check if message count has reached the limit
+		if maxMessagesPerTask <= 0 {
+			limitMessage := "Maximum of 25 requests per task reached, system has automatically exited"
+			fmt.Println(utils.ColorYellow + limitMessage + utils.ColorReset)
+			logDebug(fmt.Sprintf("MESSAGE LIMIT REACHED: %s\n", limitMessage))
+			break
+		}
+
 		// Call API
 		response, err := callAPI(*conversation)
 		if err != nil {
@@ -308,13 +319,14 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			logDebug(fmt.Sprintf("API ERROR: %s\n", err))
 
 			// Remove the last user message to avoid consecutive user messages
-			// 像DeepSeek-R1这样的模型不支持连续的user消息
+			// Models like DeepSeek-R1 don't support consecutive user messages
 			if len(*conversation) > 0 && (*conversation)[len(*conversation)-1]["role"] == "user" {
 				*conversation = (*conversation)[:len(*conversation)-1]
 			}
 
 			break
 		}
+		maxMessagesPerTask--
 
 		// Check if there's a tool use request
 		toolUse := extractToolUse(response.Content)
