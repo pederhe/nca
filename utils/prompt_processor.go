@@ -106,15 +106,48 @@ func readFileContent(filePath string) (string, error) {
 	// Read file content
 	content, err := os.ReadFile(absPath)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to read file: %v", err)
 	}
 
-	// Check if the file is binary
-	if isBinaryFile(content) {
-		return "", fmt.Errorf("cannot process binary file: %s", absPath)
+	// Check if it's a binary file
+	if isBinaryFile(content) && !isTextFileExtension(absPath) {
+		return "", fmt.Errorf("cannot read BINARY file: %s", absPath)
 	}
 
 	return string(content), nil
+}
+
+// isTextFileExtension checks if the file has a known text file extension
+func isTextFileExtension(filePath string) bool {
+	// List of common text file extensions
+	textExtensions := []string{
+		".txt", ".md", ".markdown", ".rst",
+		".py", ".pyw", ".pyx", ".pxd", ".pxi", // Python files
+		".js", ".jsx", ".ts", ".tsx", // JavaScript/TypeScript
+		".html", ".htm", ".css", ".scss", ".sass", ".less",
+		".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+		".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx",
+		".java", ".kt", ".kts", ".scala",
+		".go", ".rs", ".rb", ".php", ".pl", ".pm",
+		".sh", ".bash", ".zsh", ".fish",
+		".sql", ".r", ".m", ".swift",
+		".cs", ".fs", ".fsx", ".vb",
+		".lua", ".tcl", ".groovy", ".dart",
+		".ex", ".exs", ".erl", ".hrl",
+		".clj", ".cljs", ".cljc", ".edn",
+		".hs", ".lhs", ".elm",
+		".tf", ".tfvars", ".hcl",
+		".bat", ".cmd", ".ps1",
+	}
+
+	lowerPath := strings.ToLower(filePath)
+	for _, ext := range textExtensions {
+		if strings.HasSuffix(lowerPath, ext) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // isBinaryFile checks if the content appears to be a binary file
@@ -141,12 +174,20 @@ func isBinaryFile(content []byte) bool {
 		}
 		// Count non-printable characters
 		if c < 32 || c > 126 {
+			// UTF-8 multi-byte characters start with bytes >= 128
+			// Don't count them as binary if they appear to be part of UTF-8 sequence
+			if c >= 128 && i+1 < checkSize {
+				// Skip this byte and the next few bytes that are part of the UTF-8 sequence
+				// This is a simplified check and might not catch all UTF-8 sequences correctly
+				continue
+			}
 			nonPrintableCount++
 		}
 	}
 
-	// If more than 30% of the first 512 bytes are non-printable, consider it binary
-	return nonPrintableCount > checkSize*30/100
+	// If more than 10% of the first 512 bytes are non-printable, consider it binary
+	// This is a more lenient threshold than before (was 30%)
+	return nonPrintableCount > checkSize*10/100
 }
 
 // FetchWebContent gets web content and filters HTML tags
@@ -242,7 +283,20 @@ func FetchWebContent(urlStr string) (string, error) {
 
 	// Check if content appears to be binary
 	if isBinaryFile(previewBuffer) {
-		return "", fmt.Errorf("cannot process binary content from URL: %s", urlStr)
+		// For URLs, try to extract file extension from the URL path
+		parsedURL, err := url.Parse(urlStr)
+		if err == nil {
+			// If URL parsing succeeds, check if the path has a text file extension
+			if isTextFileExtension(parsedURL.Path) {
+				// If it has a text file extension, don't treat it as binary
+				// Continue processing
+			} else {
+				return "", fmt.Errorf("cannot process BINARY content from URL: %s", urlStr)
+			}
+		} else {
+			// If URL parsing fails, fall back to the original behavior
+			return "", fmt.Errorf("cannot process BINARY content from URL: %s", urlStr)
+		}
 	}
 
 	// Create a new reader that combines the preview and the rest of the content
