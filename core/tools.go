@@ -110,7 +110,8 @@ func ReplaceInFile(params map[string]interface{}) string {
 		return fmt.Sprintf("Error reading file: %s", err)
 	}
 
-	fileContent := string(content)
+	originalContent := string(content)
+	fileContent := originalContent
 
 	// Parse and apply SEARCH/REPLACE blocks
 	// Use regex to match SEARCH/REPLACE blocks
@@ -133,7 +134,71 @@ func ReplaceInFile(params map[string]interface{}) string {
 		return fmt.Sprintf("Error writing file: %s", err)
 	}
 
-	return fmt.Sprintf("File successfully updated: %s", path)
+	// Generate diff output in git style
+	diffOutput := generateGitStyleDiff(path, originalContent, fileContent)
+
+	return fmt.Sprintf("File successfully updated: %s\n\n%s", path, diffOutput)
+}
+
+// generateGitStyleDiff generates a git-style diff between original and new content
+func generateGitStyleDiff(filename string, originalContent, newContent string) string {
+	// Create temporary files to store original and new content
+	tempDir, err := os.MkdirTemp("", "nca-diff")
+	if err != nil {
+		return fmt.Sprintf("Error creating temp directory: %s", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	originalFile := filepath.Join(tempDir, "original")
+	newFile := filepath.Join(tempDir, "new")
+
+	if err := os.WriteFile(originalFile, []byte(originalContent), 0644); err != nil {
+		return fmt.Sprintf("Error writing temp file: %s", err)
+	}
+
+	if err := os.WriteFile(newFile, []byte(newContent), 0644); err != nil {
+		return fmt.Sprintf("Error writing temp file: %s", err)
+	}
+
+	// Use external diff command to generate standard diff output
+	cmd := exec.Command("diff", "-u", originalFile, newFile)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	// diff command returns non-zero exit code when differences are found, which is normal
+	_ = cmd.Run()
+
+	if stderr.Len() > 0 {
+		return fmt.Sprintf("Error generating diff: %s", stderr.String())
+	}
+
+	diffOutput := stdout.String()
+	if diffOutput == "" {
+		return "No changes detected"
+	}
+
+	// Process diff output, replace temporary file paths with actual file path
+	diffOutput = strings.ReplaceAll(diffOutput, "--- "+originalFile, "--- a/"+filename)
+	diffOutput = strings.ReplaceAll(diffOutput, "+++ "+newFile, "+++ b/"+filename)
+
+	// Add colors
+	var coloredOutput strings.Builder
+	scanner := bufio.NewScanner(strings.NewReader(diffOutput))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+			coloredOutput.WriteString(fmt.Sprintf("%s%s%s\n", utils.ColorGreen, line, utils.ColorReset))
+		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+			coloredOutput.WriteString(fmt.Sprintf("%s%s%s\n", utils.ColorRed, line, utils.ColorReset))
+		} else if strings.HasPrefix(line, "@@") {
+			coloredOutput.WriteString(fmt.Sprintf("%s%s%s\n", utils.ColorCyan, line, utils.ColorReset))
+		} else {
+			coloredOutput.WriteString(line + "\n")
+		}
+	}
+
+	return coloredOutput.String()
 }
 
 // SearchFiles searches for content in files

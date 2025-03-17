@@ -445,6 +445,9 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			logDebug(fmt.Sprintf("TOOL USE: %v\n", toolUse))
 
 			result := handleToolUse(toolUse)
+			if toolName == "replace_in_file" {
+				fmt.Println(result)
+			}
 
 			// Log tool result in debug mode
 			logDebug(fmt.Sprintf("TOOL RESULT: %s\n", result))
