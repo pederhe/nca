@@ -137,7 +137,7 @@ func ReplaceInFile(params map[string]interface{}) string {
 	// Generate diff output in git style
 	diffOutput := generateGitStyleDiff(path, originalContent, fileContent)
 
-	return fmt.Sprintf("File successfully updated: %s\n\n%s", path, diffOutput)
+	return fmt.Sprintf("File successfully updated: %s\n%s", path, diffOutput)
 }
 
 // generateGitStyleDiff generates a git-style diff between original and new content

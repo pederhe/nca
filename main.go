@@ -446,7 +446,11 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 
 			result := handleToolUse(toolUse)
 			if toolName == "replace_in_file" {
-				fmt.Println(result)
+				lines := strings.SplitN(result, "\n", 2)
+				if len(lines) == 2 {
+					result = lines[0]
+					fmt.Println(lines[1])
+				}
 			}
 
 			// Log tool result in debug mode
