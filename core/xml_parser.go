@@ -191,6 +191,12 @@ func ParseToolUse(content string) map[string]interface{} {
 		if len(commandMatch) > 1 {
 			params["command"] = commandMatch[1]
 		}
+
+	case "plan_mode_response":
+		responseMatch := regexp.MustCompile(`<response>([\s\S]*?)</response>`).FindStringSubmatch(toolBlock)
+		if len(responseMatch) > 1 {
+			params["response"] = responseMatch[1]
+		}
 	}
 
 	return params

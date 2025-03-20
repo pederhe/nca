@@ -353,13 +353,13 @@ func isBinaryContentType(contentType string) bool {
 	return false
 }
 
-// extractText recursively extracts text content from HTML nodes
+// extractText recursively extracts text content from HTML nodes and formats it as markdown
 func extractText(n *html.Node, sb *strings.Builder) {
 	if n.Type == html.TextNode {
 		text := strings.TrimSpace(n.Data)
 		if text != "" {
 			sb.WriteString(text)
-			sb.WriteString(" ") // Use space instead of newline to keep text flowing
+			sb.WriteString(" ")
 		}
 	}
 
@@ -368,17 +368,32 @@ func extractText(n *html.Node, sb *strings.Builder) {
 		return
 	}
 
-	// Add structure based on HTML elements
+	// Add markdown formatting based on HTML elements
 	if n.Type == html.ElementNode {
 		switch n.Data {
-		case "h1", "h2", "h3", "h4", "h5", "h6":
-			sb.WriteString("\n\n")
+		case "h1":
+			sb.WriteString("\n# ")
+		case "h2":
+			sb.WriteString("\n## ")
+		case "h3":
+			sb.WriteString("\n### ")
+		case "h4":
+			sb.WriteString("\n#### ")
+		case "h5":
+			sb.WriteString("\n##### ")
+		case "h6":
+			sb.WriteString("\n###### ")
 		case "p", "div", "section", "article", "header", "footer", "main", "aside":
-			sb.WriteString("\n")
+			sb.WriteString("\n\n")
 		case "br":
 			sb.WriteString("\n")
 		case "li":
-			sb.WriteString("\n- ")
+			// Check if parent is ordered list
+			if n.Parent != nil && n.Parent.Data == "ol" {
+				sb.WriteString("\n1. ")
+			} else {
+				sb.WriteString("\n- ")
+			}
 		case "a":
 			// Extract href attribute for links
 			for _, attr := range n.Attr {
@@ -391,14 +406,25 @@ func extractText(n *html.Node, sb *strings.Builder) {
 					linkText := strings.TrimSpace(linkTextBuilder.String())
 
 					if linkText != "" {
+						sb.WriteString("[")
 						sb.WriteString(linkText)
-						sb.WriteString(" [")
+						sb.WriteString("](")
 						sb.WriteString(attr.Val)
-						sb.WriteString("] ")
+						sb.WriteString(")")
 					}
 					return
 				}
 			}
+		case "strong", "b":
+			sb.WriteString("**")
+		case "em", "i":
+			sb.WriteString("*")
+		case "code":
+			sb.WriteString("`")
+		case "pre":
+			sb.WriteString("\n```\n")
+		case "blockquote":
+			sb.WriteString("\n> ")
 		}
 	}
 
@@ -407,18 +433,26 @@ func extractText(n *html.Node, sb *strings.Builder) {
 		extractText(c, sb)
 	}
 
-	// Add appropriate spacing after block elements
+	// Close markdown formatting
 	if n.Type == html.ElementNode {
 		switch n.Data {
+		case "strong", "b":
+			sb.WriteString("**")
+		case "em", "i":
+			sb.WriteString("*")
+		case "code":
+			sb.WriteString("`")
+		case "pre":
+			sb.WriteString("\n```\n")
 		case "h1", "h2", "h3", "h4", "h5", "h6":
-			sb.WriteString("\n\n")
+			sb.WriteString("\n")
 		case "p", "div", "section", "article", "header", "footer", "main", "aside", "ul", "ol", "table":
 			sb.WriteString("\n")
 		}
 	}
 }
 
-// cleanText removes excessive whitespace and normalizes line breaks
+// cleanText removes excessive whitespace and normalizes line breaks for markdown
 func cleanText(text string) string {
 	// Replace multiple spaces with a single space
 	re := regexp.MustCompile(`\s+`)
@@ -427,6 +461,17 @@ func cleanText(text string) string {
 	// Replace multiple newlines with a maximum of two
 	re = regexp.MustCompile(`\n{3,}`)
 	text = re.ReplaceAllString(text, "\n\n")
+
+	// Ensure proper spacing around markdown elements
+	re = regexp.MustCompile("(\\n[#*`])")
+	text = re.ReplaceAllString(text, "\n$1")
+
+	// 修复 markdown 标记中的额外空格问题
+	re = regexp.MustCompile(`\*\*([^*]+) \*\*`)
+	text = re.ReplaceAllString(text, "**$1**")
+
+	re = regexp.MustCompile("`([^`]+) `")
+	text = re.ReplaceAllString(text, "`$1`")
 
 	return strings.TrimSpace(text)
 }

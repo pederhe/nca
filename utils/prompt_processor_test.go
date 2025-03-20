@@ -216,11 +216,18 @@ func TestExtractText(t *testing.T) {
 </head>
 <body>
     <h1>Test Heading</h1>
-    <p>This is a paragraph with <a href="https://example.com">a link</a>.</p>
+    <h2>Sub Heading</h2>
+    <p>This is a paragraph with <a href="https://example.com">a link</a> and <strong>bold text</strong>.</p>
     <ul>
         <li>Item 1</li>
         <li>Item 2</li>
     </ul>
+    <ol>
+        <li>Ordered item 1</li>
+        <li>Ordered item 2</li>
+    </ol>
+    <blockquote>This is a quote</blockquote>
+    <p>Here is some <code>inline code</code> and a <pre>code block</pre></p>
     <script>console.log("This should be ignored");</script>
     <style>.hidden { display: none; }</style>
 </body>
@@ -235,30 +242,55 @@ func TestExtractText(t *testing.T) {
 	extractText(doc, &sb)
 	result := sb.String()
 
-	expectedStrings := []string{
-		"Test Heading",
-		"This is a paragraph with",
-		"a link",
-		"Item 1",
-		"Item 2",
+	// Test Markdown formatting
+	expectedMarkdown := []string{
+		"# Test Heading",
+		"## Sub Heading",
+		"This is a paragraph with [a link](https://example.com)and **bold text **",
+		"- Item 1",
+		"- Item 2",
+		"1. Ordered item 1",
+		"1. Ordered item 2",
+		"> This is a quote",
+		"`inline code `",
+		"```",
+		"code block",
+		"```",
 	}
 
+	// Test content that should not be included
 	unexpectedStrings := []string{
 		"console.log",
 		"This should be ignored",
 		".hidden { display: none; }",
 	}
 
-	for _, str := range expectedStrings {
-		if !strings.Contains(result, str) {
-			t.Errorf("extractText() result does not contain expected string: %v", str)
+	// Check if all expected Markdown formats are present
+	for _, expected := range expectedMarkdown {
+		if !strings.Contains(result, expected) {
+			t.Errorf("Expected markdown format not found: %v", expected)
 		}
 	}
 
-	for _, str := range unexpectedStrings {
-		if strings.Contains(result, str) {
-			t.Errorf("extractText() result contains unexpected string: %v", str)
+	// Check if unexpected content is excluded
+	for _, unexpected := range unexpectedStrings {
+		if strings.Contains(result, unexpected) {
+			t.Errorf("Unexpected content found: %v", unexpected)
 		}
+	}
+
+	// Test Markdown format integrity
+	if strings.Count(result, "**")%2 != 0 {
+		t.Error("Unmatched bold markdown syntax")
+	}
+	if strings.Count(result, "*")%2 != 0 {
+		t.Error("Unmatched italic markdown syntax")
+	}
+	if strings.Count(result, "`")%2 != 0 {
+		t.Error("Unmatched code markdown syntax")
+	}
+	if strings.Count(result, "```")%2 != 0 {
+		t.Error("Unmatched code block markdown syntax")
 	}
 }
 

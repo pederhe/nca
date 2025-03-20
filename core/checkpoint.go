@@ -96,21 +96,18 @@ func (cm *CheckpointManager) ListCheckpoints() string {
 
 	var result strings.Builder
 	result.WriteString("Available checkpoints:\n")
-	result.WriteString("checkpoint_id        user_prompt                        time\n")
+	result.WriteString("checkpoint_id        user_prompt\n")
 	result.WriteString("----------------------------------------------------------------\n")
 
 	for _, cp := range cm.Checkpoints {
 		// Truncate user prompt if it's too long
 		prompt := cp.UserPrompt
-		if len(prompt) > 30 {
-			prompt = prompt[:27] + "..."
+		if len(prompt) > 45 {
+			prompt = prompt[:42] + "..."
 		}
 
-		// Format timestamp
-		timeStr := cp.Timestamp.Format("2006-01-02 15:04:05")
-
 		// Format line with fixed width columns
-		result.WriteString(fmt.Sprintf("%-20s %-35s %s\n", cp.ID, prompt, timeStr))
+		result.WriteString(fmt.Sprintf("%-20s %-35s\n", cp.ID, prompt))
 	}
 
 	return result.String()
