@@ -42,7 +42,20 @@ var (
 	isProcessingAPIRequest bool
 )
 
+// Global variables for checkpoints
+var (
+	checkpointManager *core.CheckpointManager
+)
+
 func main() {
+	// Initialize checkpoint manager
+	checkpointManager = core.NewCheckpointManager()
+
+	// Load checkpoints from file
+	if err := checkpointManager.LoadCheckpoints(); err != nil {
+		fmt.Printf("Warning: Failed to load checkpoints: %s\n", err)
+	}
+
 	// No longer initialize signal handling here, let the readline library handle signals
 
 	// Set custom usage function for flag package
@@ -239,6 +252,11 @@ func runREPL(initialPrompt string) {
 	// Create custom completer for commands
 	completer := readline.NewPrefixCompleter(
 		readline.PcItem("/clear"),
+		readline.PcItem("/checkpoint",
+			readline.PcItem("list"),
+			readline.PcItem("restore"),
+			readline.PcItem("redo"),
+		),
 		readline.PcItem("/config",
 			readline.PcItem("set"),
 			readline.PcItem("unset"),
@@ -298,6 +316,13 @@ func runREPL(initialPrompt string) {
 			} else if err == io.EOF {
 				fmt.Println("Exiting")
 				logDebug("User exited with Ctrl+D\n")
+
+				// Save checkpoints before exit
+				if err := checkpointManager.SaveCheckpoints(); err != nil {
+					fmt.Printf("Warning: Failed to save checkpoints: %s\n", err)
+					logDebug(fmt.Sprintf("Failed to save checkpoints: %s\n", err))
+				}
+
 				break
 			}
 			fmt.Println("Error reading input:", err)
@@ -316,6 +341,13 @@ func runREPL(initialPrompt string) {
 			if input == "/exit" {
 				fmt.Println("Exiting")
 				logDebug("User exited with /exit command\n")
+
+				// Save checkpoints before exit
+				if err := checkpointManager.SaveCheckpoints(); err != nil {
+					fmt.Printf("Warning: Failed to save checkpoints: %s\n", err)
+					logDebug(fmt.Sprintf("Failed to save checkpoints: %s\n", err))
+				}
+
 				break
 			}
 			handleSlashCommand(input, &conversation)
@@ -369,6 +401,9 @@ func runOneOffQuery(prompt string) {
 
 // Handle user input prompt
 func handlePrompt(prompt string, conversation *[]map[string]string) {
+	// Create a checkpoint at the beginning of each prompt handling
+	checkpointManager.CreateCheckpoint(prompt)
+
 	// Check if the prompt contains files or URLs to be processed
 	// This helps users understand that their files or URLs are being processed
 	if utils.HasBackticks(prompt) {
@@ -561,6 +596,20 @@ func formatToolDescription(toolUse map[string]interface{}) string {
 
 // Handle slash command
 func handleSlashCommand(cmd string, conversation *[]map[string]string) {
+	// Handle /checkpoint command
+	if strings.HasPrefix(cmd, "/checkpoint") {
+		args := strings.Fields(cmd)
+		// Remove the "/checkpoint" prefix and pass the remaining arguments
+		var cmdArgs []string
+		if len(args) > 1 {
+			cmdArgs = args[1:]
+		}
+		result := checkpointManager.HandleCheckpointCommand(cmdArgs)
+		fmt.Println(result)
+		logDebug(fmt.Sprintf("Checkpoint command executed: %s\nResult: %s\n", cmd, result))
+		return
+	}
+
 	// Handle /config command, format: "/config [set|unset|list] [--global] [key] [value]"
 	if strings.HasPrefix(cmd, "/config") {
 		args := strings.Fields(cmd)
@@ -583,11 +632,13 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 		logDebug("Conversation history cleared by user\n")
 	case "/help":
 		fmt.Println("\nINTERACTIVE COMMANDS:")
-		fmt.Println("  /clear  - Clear conversation history")
-		fmt.Println("  /config - Manage configuration settings")
-		fmt.Println("           Usage: /config [set|unset|list] [--global] [key] [value]")
-		fmt.Println("  /exit   - Exit the program")
-		fmt.Println("  /help   - Show help information")
+		fmt.Println("  /clear      - Clear conversation history")
+		fmt.Println("  /config     - Manage configuration settings")
+		fmt.Println("               Usage: /config [set|unset|list] [--global] [key] [value]")
+		fmt.Println("  /checkpoint - Manage checkpoints")
+		fmt.Println("               Usage: /checkpoint [list|restore|redo] [checkpoint_id]")
+		fmt.Println("  /exit       - Exit the program")
+		fmt.Println("  /help       - Show help information")
 		logDebug("Help information displayed\n")
 	case "/exit":
 		// These are handled in the runREPL function
@@ -810,6 +861,36 @@ func handleToolUse(toolUse map[string]interface{}) string {
 		return "Error: Unable to determine tool to use"
 	}
 
+	// If this is a command that might delete files, track it via execute_command
+	if toolName == "execute_command" {
+		// Get the command
+		command, cmdOk := toolUse["command"].(string)
+		if cmdOk {
+			// Check if the command is likely to delete files (rm, del, etc.)
+			commandLower := strings.ToLower(command)
+			if strings.Contains(commandLower, "rm ") || strings.Contains(commandLower, "del ") ||
+				strings.Contains(commandLower, "remove ") || strings.Contains(commandLower, "rmdir ") {
+				// Extract potential file paths from the command
+				parts := strings.Fields(command)
+				for i := 1; i < len(parts); i++ {
+					path := parts[i]
+					// Skip flags
+					if strings.HasPrefix(path, "-") {
+						continue
+					}
+
+					// Check if file exists before executing
+					if fileInfo, err := os.Stat(path); err == nil && !fileInfo.IsDir() {
+						// Read file content for potential restoration
+						if content, err := os.ReadFile(path); err == nil {
+							checkpointManager.RecordFileOperation("delete", path, string(content), "")
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Special handling for attempt_completion
 	if toolName == "attempt_completion" {
 		// If there's a command parameter, execute the command
@@ -828,32 +909,82 @@ func handleToolUse(toolUse map[string]interface{}) string {
 		return ""
 	}
 
+	// Execute the appropriate tool function
+	var result string
 	switch toolName {
 	case "execute_command":
-		return core.ExecuteCommand(toolUse)
+		result = core.ExecuteCommand(toolUse)
 	case "read_file":
-		return core.ReadFile(toolUse)
+		result = core.ReadFile(toolUse)
 	case "write_to_file":
-		return core.WriteToFile(toolUse)
+		// Get the file path and content
+		path, pathOk := toolUse["path"].(string)
+		content, contentOk := toolUse["content"].(string)
+
+		if pathOk && contentOk {
+			// Check if file exists before writing
+			oldContent := ""
+			if fileContent, err := os.ReadFile(path); err == nil {
+				oldContent = string(fileContent)
+			}
+
+			// Record the file operation
+			if oldContent == "" {
+				// New file
+				checkpointManager.RecordFileOperation("write", path, content, "")
+			} else {
+				// Existing file
+				checkpointManager.RecordFileOperation("replace", path, content, oldContent)
+			}
+		}
+
+		result = core.WriteToFile(toolUse)
 	case "replace_in_file":
-		return core.ReplaceInFile(toolUse)
+		// Get the file path and diff
+		path, pathOk := toolUse["path"].(string)
+		_, diffOk := toolUse["diff"].(string)
+
+		if pathOk && diffOk {
+			// Get current content for undo
+			oldContent := ""
+			if fileContent, err := os.ReadFile(path); err == nil {
+				oldContent = string(fileContent)
+			}
+
+			// Record the operation, but set the final content after execution
+			recordOperation := func(newContent string) {
+				checkpointManager.RecordFileOperation("replace", path, newContent, oldContent)
+			}
+
+			// Get replacement result
+			result = core.ReplaceInFile(toolUse)
+
+			// Extract the new content by reading the file again
+			if newContent, err := os.ReadFile(path); err == nil {
+				recordOperation(string(newContent))
+			}
+		} else {
+			result = core.ReplaceInFile(toolUse)
+		}
 	case "search_files":
-		return core.SearchFiles(toolUse)
+		result = core.SearchFiles(toolUse)
 	case "list_files":
-		return core.ListFiles(toolUse)
+		result = core.ListFiles(toolUse)
 	case "list_code_definition_names":
-		return core.ListCodeDefinitionNames(toolUse)
+		result = core.ListCodeDefinitionNames(toolUse)
 	case "ask_followup_question":
-		return core.FollowupQuestion(toolUse)
+		result = core.FollowupQuestion(toolUse)
 	case "plan_mode_response":
-		return core.PlanModeResponse(toolUse)
+		result = core.PlanModeResponse(toolUse)
 	case "git_commit":
-		return core.GitCommit(toolUse)
+		result = core.GitCommit(toolUse)
 	case "fetch_web_content":
-		return core.FetchWebContent(toolUse)
+		result = core.FetchWebContent(toolUse)
 	default:
-		return fmt.Sprintf("Error: Unknown tool '%s'", toolName)
+		result = fmt.Sprintf("Error: Unknown tool '%s'", toolName)
 	}
+
+	return result
 }
 
 // Initialize debug mode, creating necessary directories and log file
@@ -944,9 +1075,11 @@ func displayHelp() {
 	fmt.Println("  -debug  - Enable debug mode to log conversation data")
 
 	fmt.Println("\nINTERACTIVE COMMANDS:")
-	fmt.Println("  /clear  - Clear conversation history")
-	fmt.Println("  /config - Manage configuration settings")
-	fmt.Println("           Usage: /config [set|unset|list] [--global] [key] [value]")
-	fmt.Println("  /exit   - Exit the program")
-	fmt.Println("  /help   - Show help information")
+	fmt.Println("  /clear      - Clear conversation history")
+	fmt.Println("  /config     - Manage configuration settings")
+	fmt.Println("               Usage: /config [set|unset|list] [--global] [key] [value]")
+	fmt.Println("  /checkpoint - Manage checkpoints")
+	fmt.Println("               Usage: /checkpoint [list|restore|redo] [checkpoint_id]")
+	fmt.Println("  /exit       - Exit the program")
+	fmt.Println("  /help       - Show help information")
 }
