@@ -18,6 +18,8 @@ const (
 	DeepSeekProvider ProviderType = "deepseek"
 	// QwenProvider is the Qwen AI provider
 	QwenProvider ProviderType = "qwen"
+	// DouBaoProvider is the DouBao AI provider
+	DouBaoProvider ProviderType = "doubao"
 )
 
 // GetProvider returns a provider based on the provider type
@@ -55,6 +57,8 @@ func GetProvider(providerType ProviderType) (types.Provider, error) {
 		return providers.NewDeepSeekProvider(providerConfig), nil
 	case QwenProvider:
 		return providers.NewQwenProvider(providerConfig), nil
+	case DouBaoProvider:
+		return providers.NewDouBaoProvider(providerConfig), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}
@@ -70,6 +74,8 @@ func GetDefaultProvider() (types.Provider, error) {
 			providerName = string(DeepSeekProvider)
 		} else if strings.Contains(strings.ToLower(model), "qwen") {
 			providerName = string(QwenProvider)
+		} else if strings.Contains(strings.ToLower(model), "doubao") {
+			providerName = string(DouBaoProvider)
 		}
 		// Additional model matching logic can be added here
 	}
