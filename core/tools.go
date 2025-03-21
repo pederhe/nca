@@ -38,14 +38,18 @@ func ExecuteCommand(params map[string]interface{}) string {
 	if len(parts) == 0 {
 		return "Error: Empty command"
 	}
+	if strings.Contains(command, ";") {
+		parts = []string{"bash", "-c", command}
+	}
 
 	cmd := exec.Command(parts[0], parts[1:]...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.Env = os.Environ()
 
 	err := cmd.Run()
-	if err != nil {
+	if err != nil || stderr.Len() > 0 {
 		return fmt.Sprintf("Command execution error: %s\n%s", err, stderr.String())
 	}
 
