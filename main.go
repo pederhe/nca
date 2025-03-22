@@ -245,7 +245,7 @@ func runREPL(initialPrompt string) {
 		fmt.Printf("NCA %s (%s,%s)\n", Version, BuildTime, CommitHash)
 		fmt.Println("Type /help for help")
 		if debugMode {
-			fmt.Printf(utils.ColorYellow+"Debug mode enabled. Logs saved to: %s\n"+utils.ColorReset, debugLogPath)
+			fmt.Print(utils.ColoredText("Debug mode enabled. Logs saved to: "+debugLogPath+"\n", utils.ColorYellow))
 		}
 	}
 
@@ -279,7 +279,7 @@ func runREPL(initialPrompt string) {
 
 	// Initialize readline configuration
 	rl, err := readline.NewEx(&readline.Config{
-		Prompt:            utils.ColorPurple + ">>> " + utils.ColorReset,
+		Prompt:            utils.ColoredText(">>> ", utils.ColorPurple),
 		HistoryFile:       os.Getenv("HOME") + "/.nca_history",
 		InterruptPrompt:   "^C",
 		EOFPrompt:         "exit",
@@ -412,7 +412,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 
 		newPrompt, err := utils.ProcessPrompt(prompt)
 		if err != nil {
-			fmt.Println(utils.ColorRed + "Error processing prompt: " + err.Error() + utils.ColorReset)
+			fmt.Println(utils.ColoredText("Error processing prompt: "+err.Error(), utils.ColorRed))
 			return
 		}
 		prompt = newPrompt
@@ -440,7 +440,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 		// Check if message count has reached the limit
 		if maxMessagesPerTask <= 0 {
 			limitMessage := "Maximum of 25 requests per task reached, system has automatically exited"
-			fmt.Println(utils.ColorYellow + limitMessage + utils.ColorReset)
+			fmt.Println(utils.ColoredText(limitMessage, utils.ColorYellow))
 			logDebug(fmt.Sprintf("MESSAGE LIMIT REACHED: %s\n", limitMessage))
 			break
 		}
@@ -494,7 +494,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			// Get tool name (already extracted above)
 			// Check if it's the task completion tool
 			if toolName == "attempt_completion" {
-				fmt.Println(utils.ColorYellow + result + utils.ColorReset)
+				fmt.Println(utils.ColoredText(result, utils.ColorYellow))
 				// Task completed, exit loop
 				break
 			}
@@ -628,7 +628,7 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 	case "/clear":
 		*conversation = []map[string]string{}
 		fmt.Println("Conversation history cleared")
-		fmt.Println(utils.ColorBlue + "----------------New Chat----------------" + utils.ColorReset)
+		fmt.Println(utils.ColoredText("----------------New Chat----------------", utils.ColorBlue))
 		logDebug("Conversation history cleared by user\n")
 	case "/help":
 		fmt.Println("\nINTERACTIVE COMMANDS:")
@@ -756,12 +756,12 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 			if reasoningChunk != "" {
 				if !startReasoning {
 					startReasoning = true
-					fmt.Println(utils.ColorBlue + "Reasoning:" + utils.ColorReset)
+					fmt.Println(utils.ColoredText("Reasoning:", utils.ColorBlue))
 				}
 				fmt.Print(reasoningChunk)
 			} else if chunk != "" {
 				if startReasoning {
-					fmt.Println(utils.ColorBlue + "\n----------------------------" + utils.ColorReset)
+					fmt.Println(utils.ColoredText("\n----------------------------", utils.ColorBlue))
 					startReasoning = false
 				}
 				// Filter and print the chunk
@@ -826,23 +826,33 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 
 // Display loading animation
 func showLoadingAnimation(stop chan bool, done chan bool) {
+	// If output is to a pipe, don't show animation
+	if utils.IsOutputPiped() {
+		// Immediately return completion signal, but keep channel open to avoid blocking
+		go func() {
+			<-stop
+			done <- true
+		}()
+		return
+	}
+
 	// Loading animation characters
 	spinChars := []string{"⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽", "⣾"}
 	i := 0
 
 	// Clear current line and display initial message
-	fmt.Print("\r\033[KGenerating... ")
+	fmt.Print("\rGenerating... ")
 
 	for {
 		select {
 		case <-stop:
 			// Clear animation line to ensure it doesn't affect subsequent output
-			fmt.Print("\r\033[K")
+			fmt.Print("\r                        \r")
 			done <- true // Notify that animation has stopped
 			return
 		default:
 			// Display spinning animation
-			fmt.Printf("\r\033[KGenerating... %s", spinChars[i])
+			fmt.Printf("\rGenerating... %s", spinChars[i])
 			i = (i + 1) % len(spinChars)
 			time.Sleep(100 * time.Millisecond)
 		}

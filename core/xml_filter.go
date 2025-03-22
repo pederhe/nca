@@ -218,8 +218,10 @@ func (f *XMLTagFilter) processClosingTag(tagName string) {
 		} else if f.inToolTag && len(f.tagStack) == 1 {
 			// We're closing a sub-tag inside a tool tag
 
-			// Reset color before closing the sub-tag
-			f.buffer.WriteString(utils.ColorReset)
+			// Only add color reset code if output is not to a pipe
+			if !utils.IsOutputPiped() {
+				f.buffer.WriteString(utils.ColorReset)
+			}
 
 			f.inSubTag = false
 			f.currentSubTag = ""
@@ -258,13 +260,16 @@ func (f *XMLTagFilter) processOpeningTag(tag string) {
 		// Add prefix based on tool name and tag type
 		f.buffer.WriteString(toolTagPrefix(f.tagStack[0], tag))
 
-		// Apply color based on sub-tag type
-		if tag == "path" {
-			f.buffer.WriteString(utils.ColorGreen)
-		} else if tag == "command" {
-			f.buffer.WriteString(utils.ColorYellow)
-		} else if tag == "content" {
-			//f.buffer.WriteString(core.ColorBlue)
+		// Only add color codes if output is not to a pipe
+		if !utils.IsOutputPiped() {
+			// Apply color based on sub-tag type
+			if tag == "path" {
+				f.buffer.WriteString(utils.ColorGreen)
+			} else if tag == "command" {
+				f.buffer.WriteString(utils.ColorYellow)
+			} else if tag == "content" {
+				//f.buffer.WriteString(core.ColorBlue)
+			}
 		}
 	} else if !f.inToolTag {
 		// For tags outside tool tags, output the tag

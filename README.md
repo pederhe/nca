@@ -1,6 +1,6 @@
 # NCA (Nano Code Agent)
 
-## Project Overview
+## Overview
 
 NCA is a lightweight command-line code assistant tool developed in Go, designed to help developers improve coding efficiency. By connecting to various large language model APIs (such as Doubao, Qwen, DeepSeek, etc.), NCA can understand natural language instructions, perform code analysis and generation, and assist in completing various development tasks.
 

@@ -454,24 +454,23 @@ func extractText(n *html.Node, sb *strings.Builder) {
 
 // cleanText removes excessive whitespace and normalizes line breaks for markdown
 func cleanText(text string) string {
-	// Replace multiple spaces with a single space
-	re := regexp.MustCompile(`\s+`)
-	text = re.ReplaceAllString(text, " ")
-
 	// Replace multiple newlines with a maximum of two
-	re = regexp.MustCompile(`\n{3,}`)
+	re := regexp.MustCompile(`\n{3,}`)
 	text = re.ReplaceAllString(text, "\n\n")
 
 	// Ensure proper spacing around markdown elements
 	re = regexp.MustCompile("(\\n[#*`])")
 	text = re.ReplaceAllString(text, "\n$1")
 
-	// 修复 markdown 标记中的额外空格问题
+	// Fix extra spaces in markdown syntax
 	re = regexp.MustCompile(`\*\*([^*]+) \*\*`)
 	text = re.ReplaceAllString(text, "**$1**")
 
 	re = regexp.MustCompile("`([^`]+) `")
 	text = re.ReplaceAllString(text, "`$1`")
+
+	text = strings.ReplaceAll(text, "` ", "`")
+	text = strings.ReplaceAll(text, " `", "`")
 
 	return strings.TrimSpace(text)
 }

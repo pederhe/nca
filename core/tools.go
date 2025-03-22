@@ -25,7 +25,7 @@ func ExecuteCommand(params map[string]interface{}) string {
 	autoApprove := config.Get("auto_approve") == "true" || config.Get("auto_approve") == "1"
 	requiresApproval, _ := params["requires_approval"].(bool)
 	if !autoApprove && requiresApproval {
-		fmt.Printf("Need to execute command: %s%s%s\nContinue? (y/n): ", utils.ColorYellow, command, utils.ColorReset)
+		fmt.Printf("Need to execute command: %s\nContinue? (y/n): ", utils.ColoredText(command, utils.ColorYellow))
 		var response string
 		fmt.Scanln(&response)
 		if strings.ToLower(response) != "y" {
@@ -192,11 +192,11 @@ func generateGitStyleDiff(filename string, originalContent, newContent string) s
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			coloredOutput.WriteString(fmt.Sprintf("%s%s%s\n", utils.ColorGreen, line, utils.ColorReset))
+			coloredOutput.WriteString(fmt.Sprintf("%s\n", utils.ColoredText(line, utils.ColorGreen)))
 		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-			coloredOutput.WriteString(fmt.Sprintf("%s%s%s\n", utils.ColorRed, line, utils.ColorReset))
+			coloredOutput.WriteString(fmt.Sprintf("%s\n", utils.ColoredText(line, utils.ColorRed)))
 		} else if strings.HasPrefix(line, "@@") {
-			coloredOutput.WriteString(fmt.Sprintf("%s%s%s\n", utils.ColorCyan, line, utils.ColorReset))
+			coloredOutput.WriteString(fmt.Sprintf("%s\n", utils.ColoredText(line, utils.ColorCyan)))
 		} else {
 			coloredOutput.WriteString(line + "\n")
 		}
@@ -602,7 +602,7 @@ func FetchWebContent(params map[string]interface{}) string {
 		return fmt.Sprintf("Error: Invalid URL format: %s", url)
 	}
 
-	fmt.Printf("Fetching web content from: %s%s%s\n", utils.ColorYellow, url, utils.ColorReset)
+	fmt.Printf("Fetching web content from: %s\n", utils.ColoredText(url, utils.ColorYellow))
 
 	// Fetch web content
 	content, err := utils.FetchWebContent(url)
