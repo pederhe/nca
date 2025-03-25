@@ -304,6 +304,9 @@ func runREPL(initialPrompt string) {
 		}
 	}()
 
+	// Accumulate multi-line input
+	multilineBuffer := ""
+
 	for {
 		// Read input using readline
 		input, err := rl.Readline()
@@ -314,15 +317,8 @@ func runREPL(initialPrompt string) {
 				logDebug("User interrupted input with Ctrl+C\n")
 				continue
 			} else if err == io.EOF {
-				fmt.Println("Exiting")
 				logDebug("User exited with Ctrl+D\n")
-
-				// Save checkpoints before exit
-				if err := checkpointManager.SaveCheckpoints(); err != nil {
-					fmt.Printf("Warning: Failed to save checkpoints: %s\n", err)
-					logDebug(fmt.Sprintf("Failed to save checkpoints: %s\n", err))
-				}
-
+				handleExit("with Ctrl+D")
 				break
 			}
 			fmt.Println("Error reading input:", err)
@@ -330,36 +326,96 @@ func runREPL(initialPrompt string) {
 			continue
 		}
 
-		input = strings.TrimSpace(input)
-		if input == "" {
-			continue
-		}
+		// Check for multi-line input
+		if multilineBuffer != "" {
+			// Empty line with accumulated multiline input means end of input
+			if strings.TrimSpace(input) == "" {
+				finalInput := multilineBuffer
+				multilineBuffer = ""                                       // Reset the buffer
+				rl.SetPrompt(utils.ColoredText(">>> ", utils.ColorPurple)) // Reset prompt to primary prompt
 
-		// Handle slash command
-		if strings.HasPrefix(input, "/") {
-			logDebug(fmt.Sprintf("Slash command: %s\n", input))
-			if input == "/exit" {
-				fmt.Println("Exiting")
-				logDebug("User exited with /exit command\n")
-
-				// Save checkpoints before exit
-				if err := checkpointManager.SaveCheckpoints(); err != nil {
-					fmt.Printf("Warning: Failed to save checkpoints: %s\n", err)
-					logDebug(fmt.Sprintf("Failed to save checkpoints: %s\n", err))
+				// Handle the complete multiline input
+				if handleInput(finalInput, &conversation) {
+					break
 				}
-
-				break
+				continue
 			}
-			handleSlashCommand(input, &conversation)
+
+			// If the current line ends with a backslash, remove it and add to buffer
+			if strings.HasSuffix(strings.TrimSpace(input), "\\") {
+				trimmedInput := strings.TrimSpace(input)
+				trimmedInput = trimmedInput[:len(trimmedInput)-1] // Remove the trailing backslash
+				multilineBuffer += "\n" + trimmedInput
+			} else {
+				// No backslash, add directly
+				multilineBuffer += "\n" + input
+
+				// Multi-line input ends
+				finalInput := multilineBuffer
+				multilineBuffer = ""                                       // Reset the buffer
+				rl.SetPrompt(utils.ColoredText(">>> ", utils.ColorPurple)) // Reset prompt to primary prompt
+
+				// Handle the complete multiline input
+				if handleInput(finalInput, &conversation) {
+					break
+				}
+			}
 			continue
 		}
 
-		handlePrompt(input, &conversation)
+		// Handle empty input
+		if strings.TrimSpace(input) == "" {
+			continue
+		}
+
+		// Check if input ends with backslash to start multi-line mode
+		if strings.HasSuffix(strings.TrimSpace(input), "\\") {
+			// Start accumulating multi-line input
+			// Remove the trailing backslash for the first line
+			trimmedInput := strings.TrimSpace(input)
+			multilineBuffer = trimmedInput[:len(trimmedInput)-1] // Remove the trailing backslash
+			// Set secondary prompt for continuation lines
+			rl.SetPrompt(utils.ColoredText("... ", utils.ColorPurple))
+			continue
+		}
+
+		// Handle single line input
+		if handleInput(input, &conversation) {
+			break
+		}
 	}
 
 	// Clean up signal handling
 	signal.Stop(signalChan)
 	close(signalChan)
+}
+
+func handleExit(exitReason string) {
+	fmt.Println("Exiting")
+	logDebug(fmt.Sprintf("User exited: %s\n", exitReason))
+
+	// Save checkpoints before exit
+	if err := checkpointManager.SaveCheckpoints(); err != nil {
+		fmt.Printf("Warning: Failed to save checkpoints: %s\n", err)
+		logDebug(fmt.Sprintf("Failed to save checkpoints: %s\n", err))
+	}
+}
+
+// Add a general function to handle input
+func handleInput(input string, conversation *[]map[string]string) bool {
+	// If it's a command
+	if strings.HasPrefix(input, "/") {
+		logDebug(fmt.Sprintf("Slash command: %s\n", input))
+		if input == "/exit" {
+			handleExit("with /exit command")
+			return true // Indicates need to exit
+		}
+		handleSlashCommand(input, conversation)
+	} else {
+		// Normal input processing
+		handlePrompt(input, conversation)
+	}
+	return false // Indicates no need to exit
 }
 
 // Run one-off query

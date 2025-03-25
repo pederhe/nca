@@ -35,7 +35,7 @@ make install
 
 ```bash
 # Set API provider
-nca config set model doubao-1-5-pro-32k-250115
+nca config set model deepseek-chat
 nca config set api_key your_api_key_here
 ```
 

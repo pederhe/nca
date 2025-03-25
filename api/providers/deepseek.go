@@ -56,7 +56,7 @@ func NewDeepSeekProvider(config types.ProviderConfig) *DeepSeekProvider {
 
 	model := config.Model
 	if model == "" {
-		model = "deepseek-reasoner"
+		model = "deepseek-chat"
 	}
 
 	timeout := config.Timeout
