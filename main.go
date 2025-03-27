@@ -306,6 +306,7 @@ func runREPL(initialPrompt string) {
 
 	// Accumulate multi-line input
 	multilineBuffer := ""
+	clipboardMode := false
 
 	for {
 		// Read input using readline
@@ -326,7 +327,41 @@ func runREPL(initialPrompt string) {
 			continue
 		}
 
-		// Check for multi-line input
+		// If it's an empty line and there's no accumulated input, continue reading
+		if strings.TrimSpace(input) == "" && multilineBuffer == "" {
+			continue
+		}
+
+		// Check if we need to enter or continue clipboard mode
+		if !clipboardMode {
+			isPrefix, content, err := utils.IsClipboardPrefix(input)
+			// If the input is exactly the same as the clipboard content, don't enter clipboard mode, as this means only one line of data was pasted
+			if err == nil && isPrefix && strings.TrimSpace(input) != strings.TrimSpace(content) {
+				clipboardMode = true
+				multilineBuffer = input
+				rl.SetPrompt(utils.ColoredText("... ", utils.ColorPurple))
+				continue
+			}
+		} else {
+			// In clipboard mode, there are multiple lines of data
+			// If it's an empty line, exit clipboard mode
+			if strings.TrimSpace(input) == "" {
+				clipboardMode = false
+				finalInput := multilineBuffer
+				multilineBuffer = ""
+				rl.SetPrompt(utils.ColoredText(">>> ", utils.ColorPurple))
+				if handleInput(finalInput, &conversation) {
+					break
+				}
+				continue
+			}
+
+			// Continue adding input to the buffer
+			multilineBuffer += "\n" + input
+			continue
+		}
+
+		// Process regular multi-line input (non-clipboard mode)
 		if multilineBuffer != "" {
 			// Empty line with accumulated multiline input means end of input
 			if strings.TrimSpace(input) == "" {
@@ -341,30 +376,8 @@ func runREPL(initialPrompt string) {
 				continue
 			}
 
-			// If the current line ends with a backslash, remove it and add to buffer
-			if strings.HasSuffix(strings.TrimSpace(input), "\\") {
-				trimmedInput := strings.TrimSpace(input)
-				trimmedInput = trimmedInput[:len(trimmedInput)-1] // Remove the trailing backslash
-				multilineBuffer += "\n" + trimmedInput
-			} else {
-				// No backslash, add directly
-				multilineBuffer += "\n" + input
-
-				// Multi-line input ends
-				finalInput := multilineBuffer
-				multilineBuffer = ""                                       // Reset the buffer
-				rl.SetPrompt(utils.ColoredText(">>> ", utils.ColorPurple)) // Reset prompt to primary prompt
-
-				// Handle the complete multiline input
-				if handleInput(finalInput, &conversation) {
-					break
-				}
-			}
-			continue
-		}
-
-		// Handle empty input
-		if strings.TrimSpace(input) == "" {
+			// No backslash needed for continuation lines, add directly
+			multilineBuffer += "\n" + input
 			continue
 		}
 
