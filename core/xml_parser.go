@@ -22,6 +22,7 @@ func ParseToolUse(content string) map[string]interface{} {
 		"plan_mode_response",
 		"git_commit",
 		"fetch_web_content",
+		"find_files",
 	}
 
 	// Find all root tool tags
@@ -147,6 +148,10 @@ func ParseToolUse(content string) map[string]interface{} {
 
 	case "read_file":
 		// path is already handled above
+		rangeMatch := regexp.MustCompile(`<range>([\s\S]*?)</range>`).FindStringSubmatch(toolBlock)
+		if len(rangeMatch) > 1 {
+			params["range"] = strings.TrimSpace(rangeMatch[1])
+		}
 
 	case "write_to_file":
 		contentMatch := regexp.MustCompile(`<content>([\s\S]*?)</content>`).FindStringSubmatch(toolBlock)
@@ -166,6 +171,12 @@ func ParseToolUse(content string) map[string]interface{} {
 			params["regex"] = strings.TrimSpace(regexMatch[1])
 		}
 
+		filePatternMatch := regexp.MustCompile(`<file_pattern>([\s\S]*?)</file_pattern>`).FindStringSubmatch(toolBlock)
+		if len(filePatternMatch) > 1 {
+			params["file_pattern"] = strings.TrimSpace(filePatternMatch[1])
+		}
+
+	case "find_files":
 		filePatternMatch := regexp.MustCompile(`<file_pattern>([\s\S]*?)</file_pattern>`).FindStringSubmatch(toolBlock)
 		if len(filePatternMatch) > 1 {
 			params["file_pattern"] = strings.TrimSpace(filePatternMatch[1])

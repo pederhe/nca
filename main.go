@@ -588,6 +588,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 
 			// Continue loop, process next step
 		} else {
+			logDebug(fmt.Sprintf("ERROR: No tool use response, content: %s\n", response.Content))
 			// Increment counter for responses without tool use
 			noToolUseCount++
 
@@ -657,6 +658,9 @@ func formatToolDescription(toolUse map[string]interface{}) string {
 		}
 
 		return fmt.Sprintf("[%s for message '%s']", toolName, message)
+
+	case "find_files":
+		return "[find_files]"
 
 	default:
 		return fmt.Sprintf("[%s]", toolName)
@@ -1059,6 +1063,8 @@ func handleToolUse(toolUse map[string]interface{}) string {
 		result = core.GitCommit(toolUse)
 	case "fetch_web_content":
 		result = core.FetchWebContent(toolUse)
+	case "find_files":
+		result = core.FindFiles(toolUse)
 	default:
 		result = fmt.Sprintf("Error: Unknown tool '%s'", toolName)
 	}

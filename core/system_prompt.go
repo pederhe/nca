@@ -79,9 +79,11 @@ Usage:
 Description: Request to read the contents of a file at the specified path. Use this when you need to examine the contents of an existing file you do not know the contents of, for example to analyze code, review text files, or extract information from configuration files. Automatically extracts raw text from PDF and DOCX files. May not be suitable for other types of binary files, as it returns the raw content as a string.
 Parameters:
 - path: (required) The path of the file to read (relative to the current working directory {{.CWD}})
+- range: (optional) A range of lines to read from the file. The format is "start-end" (e.g. "1-100"). If not provided, the entire file will be read.
 Usage:
 <read_file>
 <path>File path here</path>
+<range>start-end (optional)</range>
 </read_file>
 
 ## write_to_file
@@ -134,7 +136,7 @@ Search and replace blocks here
 </replace_in_file>
 
 ## search_files
-Description: Request to perform a regex search across files in a specified directory, providing context-rich results. This tool searches for patterns or specific content across multiple files, displaying each match with encapsulating context.
+Description: Request to perform a regex search across the content of files in a specified directory, providing context-rich results. This tool searches for patterns or specific content across multiple files, displaying each match with encapsulating context.
 Parameters:
 - path: (required) The path of the directory to search in (relative to the current working directory {{.CWD}}). This directory will be recursively searched.
 - regex: (required) The regular expression pattern to search for. Uses Rust regex syntax.
@@ -145,6 +147,17 @@ Usage:
 <regex>Your regex pattern here</regex>
 <file_pattern>file pattern here (optional)</file_pattern>
 </search_files>
+
+## find_files
+Description: Request to find files based on pattern matching.
+Parameters:
+- path: (required) The path of the directory to search in (relative to the current working directory {{.CWD}}). This directory will be recursively searched.
+- file_pattern: (required) Glob pattern to filter files (e.g., '*.ts' for TypeScript files).
+Usage:
+<find_files>
+<path>Directory path here</path>
+<file_pattern>file pattern here</file_pattern>
+</find_files>
 
 ## list_files
 Description: Request to list files and directories within the specified directory. If recursive is true, it will list all files and directories recursively. If recursive is false or not provided, it will only list the top-level contents. Do not use this tool to confirm the existence of files you may have created, as the user will let you know if the files were created successfully or not.
@@ -439,6 +452,7 @@ RULES
 - At the end of each user message, you will automatically receive environment_details. This information is not written by the user themselves, but is auto-generated to provide potentially relevant context about the project structure and environment. While this information can be valuable for understanding the project context, do not treat it as a direct part of the user's request or response. Use it to inform your actions and decisions, but don't assume the user is explicitly asking about or referring to this information unless they clearly do so in their message. When using environment_details, explain your actions clearly to ensure the user understands, as they may not be aware of these details.
 - Before executing commands, check the "Actively Running Terminals" section in environment_details. If present, consider how these active processes might impact your task. For example, if a local development server is already running, you wouldn't need to start it again. If no active terminals are listed, proceed with command execution as normal.
 - When using the replace_in_file tool, you must include complete lines in your SEARCH blocks, not partial lines. The system requires exact line matches and cannot match partial lines. For example, if you want to match a line containing "const x = 5;", your SEARCH block must include the entire line, not just "x = 5" or other fragments.
+- When using the read_file tool, try to use the range parameter to reduce the amount of data to read. For example, you can first search for keywords related to the problem using the search_files tool, and then read the data in the specified range based on the search results.
 - IMPORTANT NOTE: You can only use one tool per message.
 
 ====

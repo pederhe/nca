@@ -320,6 +320,10 @@ func toolTagPrefix(tool string, tag string) string {
 		if tag == "url" {
 			return "Fetch web content: "
 		}
+	case "find_files":
+		if tag == "path" {
+			return "Find files: "
+		}
 	}
 	return ""
 }
@@ -339,6 +343,7 @@ func isToolTag(tag string) bool {
 		"plan_mode_response",
 		"git_commit",
 		"fetch_web_content",
+		"find_files",
 	}
 
 	for _, toolTag := range toolTags {
@@ -352,7 +357,7 @@ func isToolTag(tag string) bool {
 
 // Check if a tag should be hidden
 func isHiddenTag(tag string) bool {
-	hiddenTags := []string{"requires_approval", "recursive", "regex", "file_pattern"}
+	hiddenTags := []string{"requires_approval", "recursive"}
 	for _, hiddenTag := range hiddenTags {
 		if tag == hiddenTag {
 			return true

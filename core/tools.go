@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/pederhe/nca/config"
@@ -63,12 +63,60 @@ func ReadFile(params map[string]interface{}) string {
 		return "Error: Missing file path parameter"
 	}
 
+	// Get range parameter if provided
+	rangeStr, _ := params["range"].(string)
+	var startLine, endLine int
+
+	// Parse range if provided
+	if rangeStr != "" {
+		parts := strings.Split(rangeStr, "-")
+		if len(parts) != 2 {
+			return "Error: Invalid range format. Expected format: start-end (e.g. 1-100)"
+		}
+
+		var err error
+		startLine, err = strconv.Atoi(parts[0])
+		if err != nil {
+			return "Error: Invalid start line number"
+		}
+
+		endLine, err = strconv.Atoi(parts[1])
+		if err != nil {
+			return "Error: Invalid end line number"
+		}
+	}
+
+	// Read file content
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Sprintf("Error reading file: %s", err)
 	}
 
-	return string(data)
+	content := string(data)
+	lines := strings.Split(content, "\n")
+
+	// If no range specified, return entire file
+	if rangeStr == "" {
+		return content
+	}
+
+	// Validate line numbers
+	if startLine < 1 {
+		startLine = 1
+	}
+	if endLine == 0 || endLine > len(lines) {
+		endLine = len(lines)
+	}
+	if startLine > endLine {
+		return "Error: start line cannot be greater than end line"
+	}
+
+	// Adjust to 0-based index
+	startLine--
+	endLine--
+
+	// Return specified line range
+	return strings.Join(lines[startLine:endLine+1], "\n")
 }
 
 // WriteToFile writes content to a file
@@ -222,6 +270,83 @@ func SearchFiles(params map[string]interface{}) string {
 		filePattern = "*"
 	}
 
+	limit := 200
+	// Check if ripgrep is available
+	rgCmd := exec.Command("rg", "--version")
+	if err := rgCmd.Run(); err == nil {
+		// ripgrep is available, use it for searching
+		var stdout, stderr bytes.Buffer
+		args := []string{
+			"--line-number",  // Show line numbers
+			"--context", "3", // Show 3 lines of context
+			"--color", "never", // Disable color output
+			regexStr,
+			path,
+		}
+
+		// Add file pattern if specified
+		if filePattern != "*" {
+			args = append([]string{"--glob", filePattern}, args...)
+		}
+
+		cmd := exec.Command("rg", args...)
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		err := cmd.Run()
+		if err != nil && err.Error() != "exit status 1" { // ripgrep returns 1 when no matches found
+			return fmt.Sprintf("Error using ripgrep: %s\n%s", err, stderr.String())
+		}
+
+		// Process ripgrep output
+		var results strings.Builder
+		results.WriteString(fmt.Sprintf("Searching for '%s' in '%s' (pattern: %s) using ripgrep\n\n", regexStr, path, filePattern))
+
+		scanner := bufio.NewScanner(&stdout)
+		var currentFile string
+		count := 0
+		for scanner.Scan() {
+			line := scanner.Text()
+			// ripgrep match output format: file:line:content
+			parts := strings.SplitN(line, ":", 3)
+			if len(parts) != 3 {
+				if line == "--" {
+					results.WriteString("  --\n")
+					continue
+				}
+				parts = strings.SplitN(line, "-", 2)
+				if len(parts) == 2 {
+					file := parts[0]
+					if file != currentFile {
+						currentFile = file
+						relPath, _ := filepath.Rel(path, file)
+						results.WriteString(fmt.Sprintf("File: %s\n", relPath))
+					}
+					results.WriteString(fmt.Sprintf("  %s\n", parts[1]))
+				}
+				continue
+			}
+
+			if count >= limit {
+				results.WriteString(fmt.Sprintf("\n... and more (showing first %d results)\n", limit))
+				break
+			}
+
+			lineNum := parts[1]
+			content := parts[2]
+
+			results.WriteString(fmt.Sprintf("  %s: %s\n", lineNum, content))
+			count++
+		}
+
+		if results.Len() == 0 {
+			return "No matches found"
+		}
+
+		return results.String()
+	}
+
+	// Fallback to original implementation if ripgrep is not available
 	// Compile regex
 	re, err := regexp.Compile(regexStr)
 	if err != nil {
@@ -229,12 +354,21 @@ func SearchFiles(params map[string]interface{}) string {
 	}
 
 	var results strings.Builder
-	results.WriteString(fmt.Sprintf("Searching for '%s' in '%s' (pattern: %s)\n\n", regexStr, path, filePattern))
+	results.WriteString(fmt.Sprintf("Searching for '%s' in '%s' (pattern: %s) using raw search\n\n", regexStr, path, filePattern))
 
+	// For ripgrep compatibility, convert glob pattern to regex
+	filePattern = strings.ReplaceAll(filePattern, ".", "\\.")
+	filePattern = strings.ReplaceAll(filePattern, "*", ".*")
+	filePattern = "^" + filePattern + "$"
 	// Walk through directory
+	count := 0
 	err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+
+		if count >= limit {
+			return filepath.SkipAll
 		}
 
 		// Skip directories
@@ -243,8 +377,8 @@ func SearchFiles(params map[string]interface{}) string {
 		}
 
 		// Check if file matches pattern
-		matched, err := filepath.Match(filePattern, filepath.Base(filePath))
-		if err != nil || !matched {
+		globRegex, err := regexp.Compile(filePattern)
+		if err != nil || !globRegex.MatchString(filePath) {
 			return nil
 		}
 
@@ -287,17 +421,22 @@ func SearchFiles(params map[string]interface{}) string {
 
 				results.WriteString("\n")
 			}
+			count++
 		}
 
 		return nil
 	})
 
-	if err != nil {
+	if err != nil && err != filepath.SkipAll {
 		return fmt.Sprintf("Error searching files: %s", err)
 	}
 
 	if results.Len() == 0 {
 		return "No matches found"
+	}
+
+	if count >= limit {
+		results.WriteString(fmt.Sprintf("\n... and more (showing first %d results)\n", limit))
 	}
 
 	return results.String()
@@ -320,47 +459,48 @@ func ListFiles(params map[string]interface{}) string {
 	}
 	files.WriteString(fmt.Sprintf("Listing files in '%s'%s:\n\n", path, recursiveText))
 
-	if recursive {
-		err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
+	// Use find command to list files
+	findCmd := fmt.Sprintf("find %s -type f -not -name '.*' -o -type d -not -path '*/.*'", path)
+	if !recursive {
+		findCmd += " -maxdepth 1"
+	}
 
-			relPath, _ := filepath.Rel(path, filePath)
-			if relPath == "." {
-				return nil
-			}
+	cmd := exec.Command("bash", "-c", findCmd)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
-			if info.IsDir() {
-				files.WriteString(fmt.Sprintf("📁 %s/\n", relPath))
-			} else {
-				files.WriteString(fmt.Sprintf("📄 %s (%d bytes)\n", relPath, info.Size()))
-			}
+	err := cmd.Run()
+	if err != nil && err.Error() != "exit status 1" {
+		return fmt.Sprintf("Error listing files: %s\n%s", err, stderr.String())
+	}
 
-			return nil
-		})
+	limit := 200
+	count := 0
+	scanner := bufio.NewScanner(&stdout)
+	for scanner.Scan() {
+		if count >= limit {
+			files.WriteString(fmt.Sprintf("\n... and more (showing first %d results)\n", limit))
+			break
+		}
 
+		filePath := scanner.Text()
+
+		info, err := os.Stat(filePath)
 		if err != nil {
-			return fmt.Sprintf("Error listing files: %s", err)
-		}
-	} else {
-		entries, err := os.ReadDir(path)
-		if err != nil {
-			return fmt.Sprintf("Error listing files: %s", err)
+			continue
 		}
 
-		for _, entry := range entries {
-			info, err := entry.Info()
-			if err != nil {
-				continue
-			}
-
-			if entry.IsDir() {
-				files.WriteString(fmt.Sprintf("📁 %s/\n", entry.Name()))
-			} else {
-				files.WriteString(fmt.Sprintf("📄 %s (%d bytes)\n", entry.Name(), info.Size()))
-			}
+		relPath, _ := filepath.Rel(path, filePath)
+		if strings.HasPrefix(relPath, ".") {
+			continue
 		}
+		if info.IsDir() {
+			files.WriteString(fmt.Sprintf("%s/\n", relPath))
+		} else {
+			files.WriteString(fmt.Sprintf("%s (%d bytes)\n", relPath, info.Size()))
+		}
+		count++
 	}
 
 	if files.Len() == 0 {
@@ -370,7 +510,8 @@ func ListFiles(params map[string]interface{}) string {
 	return files.String()
 }
 
-// ListCodeDefinitionNames lists code definitions in a directory
+// ListCodeDefinitionNames lists code definition names in a directory
+// TODO: use language parser to extract definitions
 func ListCodeDefinitionNames(params map[string]interface{}) string {
 	path, ok := params["path"].(string)
 	if !ok {
@@ -378,46 +519,48 @@ func ListCodeDefinitionNames(params map[string]interface{}) string {
 	}
 
 	var definitions strings.Builder
-	definitions.WriteString(fmt.Sprintf("Listing code definitions in '%s':\n\n", path))
+	definitions.WriteString(fmt.Sprintf("Listing code definition names in '%s':\n\n", path))
 
-	err := filepath.Walk(path, func(filePath string, info fs.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return fmt.Sprintf("Error listing definitions: %s", err)
+	}
 
-		if info.IsDir() {
-			return nil
+	limit := 200
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
 		}
 
 		// Check if it's a code file
-		ext := filepath.Ext(filePath)
+		ext := filepath.Ext(entry.Name())
 		if !isCodeFile(ext) {
-			return nil
+			continue
 		}
 
 		// Read file content
-		content, err := os.ReadFile(filePath)
+		content, err := os.ReadFile(entry.Name())
 		if err != nil {
-			return nil
+			continue
 		}
 
 		// Extract definitions
 		defs := extractDefinitions(string(content), ext)
 		if len(defs) > 0 {
-			relPath, _ := filepath.Rel(path, filePath)
+			if count >= limit {
+				definitions.WriteString(fmt.Sprintf("... and more (showing first %d results)\n", limit))
+				break
+			}
+			relPath, _ := filepath.Rel(path, entry.Name())
 			definitions.WriteString(fmt.Sprintf("File: %s\n", relPath))
-			definitions.WriteString("Definitions:\n")
+			definitions.WriteString("Definition names:\n")
 			for _, def := range defs {
 				definitions.WriteString(fmt.Sprintf("  - %s\n", def))
 			}
 			definitions.WriteString("\n")
+			count++
 		}
-
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Sprintf("Error listing definitions: %s", err)
 	}
 
 	if definitions.Len() == 0 {
@@ -457,6 +600,7 @@ func isCodeFile(ext string) bool {
 		".php":  true,
 		".rb":   true,
 		".rs":   true,
+		".lua":  true,
 	}
 	return codeExts[ext]
 }
@@ -466,36 +610,61 @@ func extractDefinitions(content, ext string) []string {
 
 	switch ext {
 	case ".go":
-		// Match Go functions and type definitions
-		funcRe := regexp.MustCompile(`func\s+([A-Za-z0-9_]+)`)
-		typeRe := regexp.MustCompile(`type\s+([A-Za-z0-9_]+)`)
-
-		funcMatches := funcRe.FindAllStringSubmatch(content, -1)
-		for _, match := range funcMatches {
-			definitions = append(definitions, "func "+match[1])
-		}
-
-		typeMatches := typeRe.FindAllStringSubmatch(content, -1)
-		for _, match := range typeMatches {
-			definitions = append(definitions, "type "+match[1])
+		lines := strings.Split(content, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "func ") || strings.HasPrefix(line, "type ") {
+				if idx := strings.LastIndex(line, "{"); idx != -1 {
+					line = strings.TrimSpace(line[:idx])
+				}
+				definitions = append(definitions, line)
+			}
 		}
 
 	case ".js", ".ts":
-		// Match JavaScript/TypeScript functions and class definitions
-		funcRe := regexp.MustCompile(`function\s+([A-Za-z0-9_]+)`)
-		classRe := regexp.MustCompile(`class\s+([A-Za-z0-9_]+)`)
-
-		funcMatches := funcRe.FindAllStringSubmatch(content, -1)
-		for _, match := range funcMatches {
-			definitions = append(definitions, "function "+match[1])
+		lines := strings.Split(content, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "function ") || strings.HasPrefix(line, "class ") {
+				if idx := strings.LastIndex(line, "{"); idx != -1 {
+					line = strings.TrimSpace(line[:idx])
+				}
+				definitions = append(definitions, line)
+			}
 		}
 
-		classMatches := classRe.FindAllStringSubmatch(content, -1)
-		for _, match := range classMatches {
-			definitions = append(definitions, "class "+match[1])
+	case ".java":
+		lines := strings.Split(content, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if (strings.HasPrefix(line, "public ") || strings.HasPrefix(line, "protected ") ||
+				strings.HasPrefix(line, "private ") || strings.HasPrefix(line, "class ") ||
+				strings.HasPrefix(line, "interface ")) &&
+				!strings.Contains(line, ";") {
+				if idx := strings.LastIndex(line, "{"); idx != -1 {
+					line = strings.TrimSpace(line[:idx])
+				}
+				definitions = append(definitions, line)
+			}
 		}
 
-		// Can add support for more languages
+	case ".lua":
+		lines := strings.Split(content, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "function ") ||
+				strings.HasPrefix(line, "local function ") ||
+				strings.Contains(line, "= function") {
+				definitions = append(definitions, line)
+			} else if strings.Contains(line, " = {") {
+				if idx := strings.Index(line, " = {"); idx != -1 {
+					line = strings.TrimSpace(line[:idx])
+					definitions = append(definitions, "table "+line)
+				}
+			}
+		}
+
+		// TODO: Add more cases for other languages
 	}
 
 	return definitions
@@ -616,4 +785,60 @@ func FetchWebContent(params map[string]interface{}) string {
 	result.WriteString(content)
 
 	return result.String()
+}
+
+// FindFiles finds files based on pattern matching
+func FindFiles(params map[string]interface{}) string {
+	path, ok := params["path"].(string)
+	if !ok {
+		return "Error: Missing directory path parameter"
+	}
+
+	filePattern, ok := params["file_pattern"].(string)
+	if !ok {
+		return "Error: Missing file pattern parameter"
+	}
+
+	var results strings.Builder
+	results.WriteString(fmt.Sprintf("Finding files in '%s' (pattern: %s)\n\n", path, filePattern))
+
+	findCmd := fmt.Sprintf("find %s -type f", path)
+	if filePattern != "*" {
+		findCmd += fmt.Sprintf(" -name '%s'", filePattern)
+	}
+
+	cmd := exec.Command("bash", "-c", findCmd)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil && err.Error() != "exit status 1" {
+		return fmt.Sprintf("Error finding files: %s\n%s", err, stderr.String())
+	}
+
+	limit := 200
+	count := 0
+	scanner := bufio.NewScanner(&stdout)
+	for scanner.Scan() {
+		if count >= limit {
+			results.WriteString(fmt.Sprintf("\n... and more (showing first %d results)\n", limit))
+			break
+		}
+		filePath := scanner.Text()
+		info, err := os.Stat(filePath)
+		if err != nil {
+			continue
+		}
+
+		relPath, _ := filepath.Rel(path, filePath)
+		results.WriteString(fmt.Sprintf("%s (%d bytes)\n", relPath, info.Size()))
+		count++
+	}
+
+	if results.Len() == 0 {
+		return "No matching files found"
+	}
+
+	return results.String()
 }
