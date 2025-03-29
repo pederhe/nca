@@ -285,8 +285,8 @@ type TestType struct {
 }
 `
 	defs := extractDefinitions(goCode, ".go")
-	assert.Contains(t, defs, "func TestFunction")
-	assert.Contains(t, defs, "type TestType")
+	assert.Contains(t, defs, "func TestFunction()")
+	assert.Contains(t, defs, "type TestType struct")
 
 	jsCode := `
 function jsFunction() {
@@ -300,7 +300,7 @@ class JsClass {
 }
 `
 	defs = extractDefinitions(jsCode, ".js")
-	assert.Contains(t, defs, "function jsFunction")
+	assert.Contains(t, defs, "function jsFunction()")
 	assert.Contains(t, defs, "class JsClass")
 }
 
@@ -410,4 +410,61 @@ func TestPlanModeResponse(t *testing.T) {
 	params = map[string]interface{}{}
 	result = PlanModeResponse(params)
 	assert.Contains(t, result, "Error: No response provided")
+}
+
+// Test FindFiles function
+func TestFindFiles(t *testing.T) {
+	tempDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	// Create additional test files with different extensions
+	jsonFilePath := filepath.Join(tempDir, "test_data.json")
+	err := os.WriteFile(jsonFilePath, []byte(`{"key": "value"}`), 0644)
+	assert.NoError(t, err)
+
+	txtFilePath := filepath.Join(tempDir, "another_test.txt")
+	err = os.WriteFile(txtFilePath, []byte("Another test file"), 0644)
+	assert.NoError(t, err)
+
+	// Test finding files with specific pattern
+	params := map[string]interface{}{
+		"path":         tempDir,
+		"file_pattern": "*.txt",
+	}
+
+	result := FindFiles(params)
+	assert.Contains(t, result, "test_file.txt")
+	assert.Contains(t, result, "another_test.txt")
+	assert.NotContains(t, result, "test_code.go")
+	assert.NotContains(t, result, "test_data.json")
+
+	// Test finding all files
+	params = map[string]interface{}{
+		"path":         tempDir,
+		"file_pattern": "*",
+	}
+
+	result = FindFiles(params)
+	assert.Contains(t, result, "test_file.txt")
+	assert.Contains(t, result, "test_code.go")
+	assert.Contains(t, result, "test_data.json")
+
+	// Test finding files in subdirectory
+	subDir := filepath.Join(tempDir, "subdir")
+	if _, err := os.Stat(subDir); os.IsNotExist(err) {
+		err = os.Mkdir(subDir, 0755)
+		assert.NoError(t, err)
+	}
+
+	subFilePath := filepath.Join(subDir, "subfile.txt")
+	err = os.WriteFile(subFilePath, []byte("Subdir file content"), 0644)
+	assert.NoError(t, err)
+
+	params = map[string]interface{}{
+		"path":         tempDir,
+		"file_pattern": "*.txt",
+	}
+
+	result = FindFiles(params)
+	assert.Contains(t, result, "subdir/subfile.txt")
 }

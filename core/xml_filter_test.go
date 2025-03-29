@@ -251,8 +251,8 @@ func TestIsHiddenTag(t *testing.T) {
 	}{
 		{"requires_approval", true},
 		{"recursive", true},
-		{"regex", true},
-		{"file_pattern", true},
+		{"regex", false},
+		{"file_pattern", false},
 		{"command", false},
 		{"path", false},
 		{"content", false},

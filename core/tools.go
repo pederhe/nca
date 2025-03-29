@@ -309,7 +309,25 @@ func SearchFiles(params map[string]interface{}) string {
 			line := scanner.Text()
 			// ripgrep match output format: file:line:content
 			parts := strings.SplitN(line, ":", 3)
-			if len(parts) != 3 {
+			if len(parts) == 3 {
+				if count >= limit {
+					results.WriteString(fmt.Sprintf("\n... and more (showing first %d results)\n", limit))
+					break
+				}
+
+				file := parts[0]
+				if file != currentFile {
+					currentFile = file
+					relPath, _ := filepath.Rel(path, file)
+					results.WriteString(fmt.Sprintf("File: %s\n", relPath))
+				}
+
+				lineNum := parts[1]
+				content := parts[2]
+
+				results.WriteString(fmt.Sprintf("  %s: %s\n", lineNum, content))
+				count++
+			} else {
 				if line == "--" {
 					results.WriteString("  --\n")
 					continue
@@ -324,19 +342,7 @@ func SearchFiles(params map[string]interface{}) string {
 					}
 					results.WriteString(fmt.Sprintf("  %s\n", parts[1]))
 				}
-				continue
 			}
-
-			if count >= limit {
-				results.WriteString(fmt.Sprintf("\n... and more (showing first %d results)\n", limit))
-				break
-			}
-
-			lineNum := parts[1]
-			content := parts[2]
-
-			results.WriteString(fmt.Sprintf("  %s: %s\n", lineNum, content))
-			count++
 		}
 
 		if results.Len() == 0 {
@@ -540,7 +546,8 @@ func ListCodeDefinitionNames(params map[string]interface{}) string {
 		}
 
 		// Read file content
-		content, err := os.ReadFile(entry.Name())
+		filePath := filepath.Join(path, entry.Name())
+		content, err := os.ReadFile(filePath)
 		if err != nil {
 			continue
 		}
@@ -552,8 +559,7 @@ func ListCodeDefinitionNames(params map[string]interface{}) string {
 				definitions.WriteString(fmt.Sprintf("... and more (showing first %d results)\n", limit))
 				break
 			}
-			relPath, _ := filepath.Rel(path, entry.Name())
-			definitions.WriteString(fmt.Sprintf("File: %s\n", relPath))
+			definitions.WriteString(fmt.Sprintf("File: %s\n", entry.Name()))
 			definitions.WriteString("Definition names:\n")
 			for _, def := range defs {
 				definitions.WriteString(fmt.Sprintf("  - %s\n", def))
@@ -614,7 +620,7 @@ func extractDefinitions(content, ext string) []string {
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "func ") || strings.HasPrefix(line, "type ") {
-				if idx := strings.LastIndex(line, "{"); idx != -1 {
+				if idx := strings.Index(line, "{"); idx != -1 {
 					line = strings.TrimSpace(line[:idx])
 				}
 				definitions = append(definitions, line)
@@ -626,7 +632,7 @@ func extractDefinitions(content, ext string) []string {
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "function ") || strings.HasPrefix(line, "class ") {
-				if idx := strings.LastIndex(line, "{"); idx != -1 {
+				if idx := strings.Index(line, "{"); idx != -1 {
 					line = strings.TrimSpace(line[:idx])
 				}
 				definitions = append(definitions, line)
@@ -641,7 +647,7 @@ func extractDefinitions(content, ext string) []string {
 				strings.HasPrefix(line, "private ") || strings.HasPrefix(line, "class ") ||
 				strings.HasPrefix(line, "interface ")) &&
 				!strings.Contains(line, ";") {
-				if idx := strings.LastIndex(line, "{"); idx != -1 {
+				if idx := strings.Index(line, "{"); idx != -1 {
 					line = strings.TrimSpace(line[:idx])
 				}
 				definitions = append(definitions, line)
