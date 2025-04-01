@@ -218,6 +218,12 @@ func (t *SSEClientTransport) startOrAuth() error {
 			}
 			return t.startOrAuth()
 		}
+
+		// Set isConnected to false when connection fails
+		t.mutex.Lock()
+		t.isConnected = false
+		t.mutex.Unlock()
+
 		return err
 
 	case <-t.ctx.Done():
@@ -324,10 +330,6 @@ func (t *SSEClientTransport) handleMessage(data string) {
 func (t *SSEClientTransport) Close() error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-
-	if !t.isConnected {
-		return nil
-	}
 
 	if t.cancel != nil {
 		t.cancel()
