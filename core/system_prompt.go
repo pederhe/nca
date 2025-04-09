@@ -2,11 +2,14 @@ package core
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
 	"text/template"
 
+	"github.com/pederhe/nca/core/mcp/hub"
 	"github.com/pederhe/nca/utils"
 )
 
@@ -29,15 +32,93 @@ func BuildSystemPrompt() (string, error) {
 	}
 	cwd = toPosix(cwd)
 
-	data := map[string]interface{}{
-		"CWD":     cwd,
-		"Shell":   shell,
-		"OS":      osName,
-		"HomeDir": homeDir,
+	// Get connected MCP servers information
+	var mcpServersInfo string
+	mcpHub := hub.GetMcpHub()
+	servers := mcpHub.GetServers()
+	if mcpHub.GetMode() != "off" && len(servers) > 0 {
+		var connectedServers []string
+
+		for _, server := range servers {
+			if server.Status == "connected" {
+				var serverInfo strings.Builder
+
+				// Parse server config
+				var config hub.ServerConfig
+				if err := json.Unmarshal([]byte(server.Config), &config); err != nil {
+					continue
+				}
+
+				// Build command string
+				cmdStr := config.Command
+				if len(config.Args) > 0 {
+					cmdStr += " " + strings.Join(config.Args, " ")
+				}
+
+				// Write server title
+				serverInfo.WriteString(fmt.Sprintf("## %s (`%s`)\n", server.Name, cmdStr))
+
+				// Add available tools information
+				if len(server.Tools) > 0 {
+					serverInfo.WriteString("\n### Available Tools\n")
+					for _, tool := range server.Tools {
+						serverInfo.WriteString(fmt.Sprintf("- %s: %s\n", tool.Name, tool.Description))
+						if tool.InputSchema != nil {
+							schemaBytes, _ := json.MarshalIndent(tool.InputSchema, "    ", "  ")
+							serverInfo.WriteString("    Input Schema:\n    " + string(schemaBytes) + "\n")
+						}
+					}
+				}
+
+				// Add resource templates information
+				if len(server.ResourceTemplates) > 0 {
+					serverInfo.WriteString("\n### Resource Templates\n")
+					for _, tmpl := range server.ResourceTemplates {
+						serverInfo.WriteString(fmt.Sprintf("- %s (%s): %s\n",
+							tmpl.URITemplate, tmpl.Name, tmpl.Description))
+					}
+				}
+
+				// Add direct resources information
+				if len(server.Resources) > 0 {
+					serverInfo.WriteString("\n### Direct Resources\n")
+					for _, res := range server.Resources {
+						serverInfo.WriteString(fmt.Sprintf("- %s (%s): %s\n",
+							res.URI, res.Name, res.Description))
+					}
+				}
+
+				connectedServers = append(connectedServers, serverInfo.String())
+			}
+		}
+
+		if len(connectedServers) > 0 {
+			mcpServersInfo = strings.Join(connectedServers, "\n\n")
+		} else {
+			mcpServersInfo = "(No MCP servers currently connected)"
+		}
+	} else {
+		mcpServersInfo = "(No MCP servers currently connected)"
 	}
 
-	prompt := `You are nca, a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices.
- 
+	data := map[string]interface{}{
+		"CWD":        cwd,
+		"Shell":      shell,
+		"OS":         osName,
+		"HomeDir":    homeDir,
+		"MCPServers": mcpServersInfo,
+	}
+
+	prompt := `
+
+# Identity and Tone
+You are NCA, a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices. 
+You are good at explaining technical processes in natural language, and adopt a collaborative tone that:
+
+1. Uses first-person narration for cognitive processes ("I'll need to... Let me first check...").
+2. Shows progressive discovery ("Hmm, the error suggests... Maybe we should...").
+3. Maintains professional clarity while feeling approachable.
+
 ====
 
 TOOL USE
@@ -179,6 +260,35 @@ Usage:
 <path>Directory path here</path>
 </list_code_definition_names>
 
+## use_mcp_tool
+Description: Request to use a tool provided by a connected MCP server. Each MCP server can provide multiple tools with different capabilities. Tools have defined input schemas that specify required and optional parameters.
+Parameters:
+- server_name: (required) The name of the MCP server providing the tool
+- tool_name: (required) The name of the tool to execute
+- arguments: (required) A JSON object containing the tool's input parameters, following the tool's input schema
+Usage:
+<use_mcp_tool>
+<server_name>server name here</server_name>
+<tool_name>tool name here</tool_name>
+<arguments>
+{
+  "param1": "value1",
+  "param2": "value2"
+}
+</arguments>
+</use_mcp_tool>
+
+## access_mcp_resource
+Description: Request to access a resource provided by a connected MCP server. Resources represent data sources that can be used as context, such as files, API responses, or system information.
+Parameters:
+- server_name: (required) The name of the MCP server providing the resource
+- uri: (required) The URI identifying the specific resource to access
+Usage:
+<access_mcp_resource>
+<server_name>server name here</server_name>
+<uri>resource URI here</uri>
+</access_mcp_resource>
+
 ## ask_followup_question
 Description: Ask the user a question to gather additional information needed to complete the task. This tool should be used when you encounter ambiguities, need clarification, or require more details to proceed effectively. It allows for interactive problem-solving by enabling direct communication with the user. Use this tool judiciously to maintain a balance between gathering necessary information and avoiding excessive back-and-forth.
 Parameters:
@@ -300,6 +410,43 @@ return (
 </diff>
 </replace_in_file>
 
+## Example 4: Requesting to use an MCP tool
+
+<use_mcp_tool>
+<server_name>weather-server</server_name>
+<tool_name>get_forecast</tool_name>
+<arguments>
+{
+  "city": "San Francisco",
+  "days": 5
+}
+</arguments>
+</use_mcp_tool>
+
+## Example 5: Requesting to access an MCP resource
+
+<access_mcp_resource>
+<server_name>weather-server</server_name>
+<uri>weather://san-francisco/current</uri>
+</access_mcp_resource>
+
+## Example 6: Another example of using an MCP tool (where the server name is a unique identifier such as a URL)
+
+<use_mcp_tool>
+<server_name>github.com/modelcontextprotocol/servers/tree/main/src/github</server_name>
+<tool_name>create_issue</tool_name>
+<arguments>
+{
+  "owner": "octocat",
+  "repo": "hello-world",
+  "title": "Found a bug",
+  "body": "I'm having a problem with this.",
+  "labels": ["bug", "help wanted"],
+  "assignees": ["octocat"]
+}
+</arguments>
+</use_mcp_tool>
+
 # Tool Use Guidelines
 
 1. In <thinking> tags, assess what information you already have and what information you need to proceed with the task.
@@ -312,6 +459,7 @@ return (
 - New terminal output in reaction to the changes, which you may need to consider or act upon.
 - Any other relevant feedback or information related to the tool use.
 6. ALWAYS wait for user confirmation after each tool use before proceeding. Never assume the success of a tool use without explicit confirmation of the result from the user.
+7. Before each tool use, briefly state your intent.
 
 It is crucial to proceed step-by-step, waiting for the user's message after each tool use before moving forward with the task. This approach allows you to:
 1. Confirm the success of each step before proceeding.
@@ -320,6 +468,18 @@ It is crucial to proceed step-by-step, waiting for the user's message after each
 4. Ensure that each action builds correctly on the previous ones.
 
 By waiting for and carefully considering the user's response after each tool use, you can react accordingly and make informed decisions about how to proceed with the task. This iterative process helps ensure the overall success and accuracy of your work.
+
+====
+
+MCP SERVERS
+
+The Model Context Protocol (MCP) enables communication between the system and locally running MCP servers that provide additional tools and resources to extend your capabilities.
+
+# Connected MCP Servers
+
+When a server is connected, you can use the server's tools via the 'use_mcp_tool' tool, and access the server's resources via the 'access_mcp_resource' tool.
+
+{{.MCPServers}}
 
 ====
 

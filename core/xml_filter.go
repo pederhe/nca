@@ -18,6 +18,7 @@ type XMLTagFilter struct {
 	inDiffTag     bool            // Whether inside a diff tag
 	inContentTag  bool            // Whether inside a content tag
 	pendingBuffer strings.Builder // Buffer for storing potential tag start sequences
+	showThinking  bool            // Controls whether to show thinking tags and content, defaults to false
 }
 
 // Create a new XML tag filter
@@ -33,7 +34,18 @@ func NewXMLTagFilter() *XMLTagFilter {
 		inDiffTag:     false,
 		inContentTag:  false,
 		pendingBuffer: strings.Builder{},
+		showThinking:  false,
 	}
+}
+
+// SetShowThinking sets whether to show thinking tags and content
+func (f *XMLTagFilter) SetShowThinking(show bool) {
+	f.showThinking = show
+}
+
+// GetShowThinking returns whether thinking tags and content are shown
+func (f *XMLTagFilter) GetShowThinking() bool {
+	return f.showThinking
 }
 
 // Process a chunk of text and filter out XML tool tags
@@ -82,6 +94,20 @@ func (f *XMLTagFilter) ProcessChunk(chunk string) string {
 		// Collect tag name
 		if f.collectingTag {
 			f.currentTag.WriteByte(c)
+			continue
+		}
+
+		// Check if we're inside a thinking tag and showThinking is false
+		inThinkingTag := false
+		for _, tag := range f.tagStack {
+			if tag == "thinking" {
+				inThinkingTag = true
+				break
+			}
+		}
+
+		// Skip output if in thinking tag and not showing thinking content
+		if inThinkingTag && !f.showThinking {
 			continue
 		}
 
@@ -198,9 +224,12 @@ func (f *XMLTagFilter) processTag(tag string) {
 
 // Process a closing tag
 func (f *XMLTagFilter) processClosingTag(tagName string) {
-	// Special handling for thinking tag: don't output closing tag
+	// Special handling for thinking tag: don't output closing tag unless showThinking is true
 	if tagName == "thinking" && len(f.tagStack) > 0 && f.tagStack[len(f.tagStack)-1] == "thinking" {
-		// Just remove from tag stack without further processing
+		if f.showThinking {
+			f.buffer.WriteString("</thinking>")
+		}
+		// Remove from tag stack
 		f.tagStack = f.tagStack[:len(f.tagStack)-1]
 		return
 	}
@@ -230,15 +259,23 @@ func (f *XMLTagFilter) processClosingTag(tagName string) {
 				// Add a newline after the sub-tag content for better formatting
 				f.buffer.WriteByte('\n')
 			}
+		} else if !f.inToolTag && !isThinkingTag(tagName) {
+			// For regular closing tags (not thinking tags), output the tag
+			f.buffer.WriteString("</")
+			f.buffer.WriteString(tagName)
+			f.buffer.WriteByte('>')
 		}
 	}
 }
 
 // Process an opening tag
 func (f *XMLTagFilter) processOpeningTag(tag string) {
-	// Special handling for thinking tag: don't output opening tag, but still add it to tag stack
+	// Special handling for thinking tag: only output opening tag if showThinking is true
 	if tag == "thinking" {
 		f.tagStack = append(f.tagStack, tag)
+		if f.showThinking {
+			f.buffer.WriteString("<thinking>")
+		}
 		return
 	}
 
@@ -271,8 +308,8 @@ func (f *XMLTagFilter) processOpeningTag(tag string) {
 				//f.buffer.WriteString(core.ColorBlue)
 			}
 		}
-	} else if !f.inToolTag {
-		// For tags outside tool tags, output the tag
+	} else if !f.inToolTag && !isThinkingTag(tag) {
+		// For tags outside tool tags (except thinking tags), output the tag
 		f.buffer.WriteByte('<')
 		f.buffer.WriteString(tag)
 		f.buffer.WriteByte('>')
@@ -286,31 +323,31 @@ func toolTagPrefix(tool string, tag string) string {
 	switch tool {
 	case "execute_command":
 		if tag == "command" {
-			return "Execute command: "
+			return "Execute "
 		}
 	case "read_file":
 		if tag == "path" {
-			return "Read file: "
+			return "Read "
 		}
 	case "write_to_file":
 		if tag == "path" {
-			return "Write to file: "
+			return "Write "
 		}
 	case "replace_in_file":
 		if tag == "path" {
-			return "Replace in file: "
+			return "Replace "
 		}
 	case "search_files":
 		if tag == "path" {
-			return "Search files: "
+			return "Search "
 		}
 	case "list_files":
 		if tag == "path" {
-			return "List files: "
+			return "List "
 		}
 	case "list_code_definition_names":
 		if tag == "path" {
-			return "Code file: "
+			return "Code "
 		}
 	case "git_commit":
 		if tag == "message" {
@@ -318,11 +355,11 @@ func toolTagPrefix(tool string, tag string) string {
 		}
 	case "fetch_web_content":
 		if tag == "url" {
-			return "Fetch web content: "
+			return "Fetch "
 		}
 	case "find_files":
 		if tag == "path" {
-			return "Find files: "
+			return "Find "
 		}
 	}
 	return ""
@@ -364,4 +401,9 @@ func isHiddenTag(tag string) bool {
 		}
 	}
 	return false
+}
+
+// Check if a tag is a thinking tag
+func isThinkingTag(tag string) bool {
+	return tag == "thinking"
 }

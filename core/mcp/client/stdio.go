@@ -1,13 +1,17 @@
 package client
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/pederhe/nca/core/mcp/common"
 )
@@ -95,6 +99,12 @@ func (t *StdioClientTransport) Start(ctx context.Context) error {
 	// Create the command
 	t.process = exec.CommandContext(t.ctx, t.serverParams.Command, t.serverParams.Args...)
 
+	// explicitly set process group, so subprocess can receive termination signals
+	// on Unix systems, this helps ensure that all processes in the process group can be terminated
+	t.process.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+
 	// Set environment
 	if t.serverParams.Env != nil {
 		env := make([]string, 0, len(t.serverParams.Env))
@@ -136,9 +146,27 @@ func (t *StdioClientTransport) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("cannot create stderr pipe: %w", err)
 		}
-		// If no stderr handler is provided, default it to connect to parent process's stderr
+
+		// handle subprocess standard error output
 		go func() {
-			io.Copy(os.Stderr, t.stderr)
+			// If no stderr handler is provided, default it to connect to parent process's stderr
+			if t.errorHandler == nil {
+				io.Copy(os.Stderr, t.stderr)
+			} else {
+				// read but not display (discard output), but record critical errors
+				scanner := bufio.NewScanner(t.stderr)
+				for scanner.Scan() {
+					line := scanner.Text()
+					// record lines containing "error", "fatal", "panic" to error handler
+					if strings.Contains(strings.ToLower(line), "error") ||
+						strings.Contains(strings.ToLower(line), "fatal") ||
+						strings.Contains(strings.ToLower(line), "panic") {
+						if t.errorHandler != nil {
+							t.errorHandler(fmt.Errorf("subprocess error: %s", line))
+						}
+					}
+				}
+			}
 		}()
 	}
 
@@ -161,6 +189,15 @@ func (t *StdioClientTransport) Start(ctx context.Context) error {
 
 		if err != nil && t.errorHandler != nil && !errors.Is(err, context.Canceled) {
 			t.errorHandler(fmt.Errorf("process exited abnormally: %w", err))
+		}
+
+		// ensure process has fully terminated
+		if t.process != nil && t.process.Process != nil {
+			// if process is still running (this should be rare, since we already called Wait)
+			if t.process.ProcessState == nil || !t.process.ProcessState.Exited() {
+				// force terminate process
+				t.process.Process.Kill()
+			}
 		}
 
 		t.handleClose()
@@ -228,6 +265,28 @@ func (t *StdioClientTransport) Close() error {
 		t.cancel()
 	}
 
+	// ensure subprocess is terminated
+	if t.process != nil && t.process.Process != nil {
+		// first try to gracefully close subprocess
+		if t.stdin != nil {
+			t.stdin.Close()
+		}
+
+		// wait a short time to see if process exits by itself
+		done := make(chan error, 1)
+		go func() {
+			done <- t.process.Wait()
+		}()
+
+		select {
+		case <-done:
+			// process has exited, no need to do anything
+		case <-time.After(100 * time.Millisecond):
+			// if process does not exit by itself, force terminate it
+			t.process.Process.Kill()
+		}
+	}
+
 	t.isConnected = false
 	t.readBuffer.Clear()
 
@@ -283,6 +342,15 @@ func (t *StdioClientTransport) Stderr() io.ReadCloser {
 
 // handleClose handles connection close events
 func (t *StdioClientTransport) handleClose() {
+	// ensure process is terminated
+	if t.process != nil && t.process.Process != nil {
+		// check if process is still running
+		if t.process.ProcessState == nil || !t.process.ProcessState.Exited() {
+			// process is still running, force terminate it
+			t.process.Process.Kill()
+		}
+	}
+
 	if t.closeHandler != nil {
 		t.closeHandler()
 	}

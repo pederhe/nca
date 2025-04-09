@@ -10,7 +10,7 @@ import (
 )
 
 // DefaultRequestTimeoutMsec is the default request timeout in milliseconds
-const DefaultRequestTimeoutMsec = 6000
+const DefaultRequestTimeoutMsec = 60000
 
 // RequestID is the unique identifier for a request
 type RequestID interface{}

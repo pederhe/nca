@@ -17,6 +17,7 @@ import (
 	"github.com/pederhe/nca/api/types"
 	"github.com/pederhe/nca/config"
 	"github.com/pederhe/nca/core"
+	"github.com/pederhe/nca/core/mcp/hub"
 	"github.com/pederhe/nca/utils"
 )
 
@@ -55,6 +56,10 @@ func main() {
 	if err := checkpointManager.LoadCheckpoints(); err != nil {
 		fmt.Printf("Warning: Failed to load checkpoints: %s\n", err)
 	}
+
+	// Initialize MCP hub
+	mcpHub := hub.GetMcpHub()
+	defer mcpHub.Dispose()
 
 	// No longer initialize signal handling here, let the readline library handle signals
 
@@ -659,6 +664,16 @@ func formatToolDescription(toolUse map[string]interface{}) string {
 
 		return fmt.Sprintf("[%s for message '%s']", toolName, message)
 
+	case "use_mcp_tool":
+		serverName, _ := toolUse["server_name"].(string)
+		toolNameParam, _ := toolUse["tool_name"].(string)
+		return fmt.Sprintf("[%s for server '%s', tool '%s']", toolName, serverName, toolNameParam)
+
+	case "access_mcp_resource":
+		serverName, _ := toolUse["server_name"].(string)
+		uri, _ := toolUse["uri"].(string)
+		return fmt.Sprintf("[%s for server '%s', uri '%s']", toolName, serverName, uri)
+
 	case "find_files":
 		return "[find_files]"
 
@@ -819,17 +834,16 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 				// Continue normal processing
 			}
 
-			// Stop loading animation when first response chunk is received
-			if (len(reasoningChunk) > 0 || len(chunk) > 0) && !animationStopped {
-				stopLoading <- true
-				<-animationDone // Wait for animation to actually stop
-				animationStopped = true
-			}
-
 			if reasoningChunk != "" {
 				if !startReasoning {
 					startReasoning = true
 					fmt.Println(utils.ColoredText("Reasoning:", utils.ColorBlue))
+				}
+				// Stop loading animation when first reasoning chunk is received
+				if len(reasoningChunk) > 0 && !animationStopped {
+					stopLoading <- true
+					<-animationDone // Wait for animation to actually stop
+					animationStopped = true
 				}
 				fmt.Print(reasoningChunk)
 			} else if chunk != "" {
@@ -839,6 +853,12 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 				}
 				// Filter and print the chunk
 				filtered := filter.ProcessChunk(chunk)
+				// Stop loading animation when first available chunk is received
+				if len(filtered) > 0 && !animationStopped {
+					stopLoading <- true
+					<-animationDone // Wait for animation to actually stop
+					animationStopped = true
+				}
 				fmt.Print(filtered)
 			}
 		}
@@ -1065,6 +1085,10 @@ func handleToolUse(toolUse map[string]interface{}) string {
 		result = core.FetchWebContent(toolUse)
 	case "find_files":
 		result = core.FindFiles(toolUse)
+	case "use_mcp_tool":
+		result = core.UseMcpTool(toolUse)
+	case "access_mcp_resource":
+		result = core.AccessMcpResource(toolUse)
 	default:
 		result = fmt.Sprintf("Error: Unknown tool '%s'", toolName)
 	}

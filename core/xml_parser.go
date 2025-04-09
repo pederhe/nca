@@ -23,6 +23,8 @@ func ParseToolUse(content string) map[string]interface{} {
 		"git_commit",
 		"fetch_web_content",
 		"find_files",
+		"use_mcp_tool",
+		"access_mcp_resource",
 	}
 
 	// Find all root tool tags
@@ -207,6 +209,33 @@ func ParseToolUse(content string) map[string]interface{} {
 		responseMatch := regexp.MustCompile(`<response>([\s\S]*?)</response>`).FindStringSubmatch(toolBlock)
 		if len(responseMatch) > 1 {
 			params["response"] = responseMatch[1]
+		}
+
+	case "use_mcp_tool":
+		serverNameMatch := regexp.MustCompile(`<server_name>([\s\S]*?)</server_name>`).FindStringSubmatch(toolBlock)
+		if len(serverNameMatch) > 1 {
+			params["server_name"] = strings.TrimSpace(serverNameMatch[1])
+		}
+
+		toolNameMatch := regexp.MustCompile(`<tool_name>([\s\S]*?)</tool_name>`).FindStringSubmatch(toolBlock)
+		if len(toolNameMatch) > 1 {
+			params["tool_name"] = strings.TrimSpace(toolNameMatch[1])
+		}
+
+		argumentsMatch := regexp.MustCompile(`<arguments>([\s\S]*?)</arguments>`).FindStringSubmatch(toolBlock)
+		if len(argumentsMatch) > 1 {
+			params["arguments"] = strings.TrimSpace(argumentsMatch[1])
+		}
+
+	case "access_mcp_resource":
+		serverNameMatch := regexp.MustCompile(`<server_name>([\s\S]*?)</server_name>`).FindStringSubmatch(toolBlock)
+		if len(serverNameMatch) > 1 {
+			params["server_name"] = strings.TrimSpace(serverNameMatch[1])
+		}
+
+		uriMatch := regexp.MustCompile(`<uri>([\s\S]*?)</uri>`).FindStringSubmatch(toolBlock)
+		if len(uriMatch) > 1 {
+			params["uri"] = strings.TrimSpace(uriMatch[1])
 		}
 	}
 
