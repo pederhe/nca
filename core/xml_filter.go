@@ -377,7 +377,7 @@ func isToolTag(tag string) bool {
 		"list_code_definition_names",
 		"attempt_completion",
 		"ask_followup_question",
-		"plan_mode_response",
+		"ask_mode_response",
 		"git_commit",
 		"fetch_web_content",
 		"find_files",

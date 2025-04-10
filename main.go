@@ -268,6 +268,10 @@ func runREPL(initialPrompt string) {
 			readline.PcItem("list"),
 			readline.PcItem("--global"),
 		),
+		readline.PcItem("/mcp",
+			readline.PcItem("list"),
+			readline.PcItem("reload"),
+		),
 		readline.PcItem("/help"),
 		readline.PcItem("/exit"),
 	)
@@ -572,7 +576,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 				// Task completed, exit loop
 				break
 			}
-			if toolName == "plan_mode_response" || toolName == "ask_followup_question" {
+			if toolName == "ask_mode_response" || toolName == "ask_followup_question" {
 				// Task completed, exit loop
 				break
 			}
@@ -630,8 +634,8 @@ func formatToolDescription(toolUse map[string]interface{}) string {
 	case "attempt_completion":
 		return "[attempt_completion]"
 
-	case "plan_mode_response":
-		return "[plan_mode_response]"
+	case "ask_mode_response":
+		return "[ask_mode_response]"
 
 	case "ask_followup_question":
 		question, _ := toolUse["question"].(string)
@@ -712,6 +716,31 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 		return
 	}
 
+	// Handle /mcp command, format: "/mcp [list|reload]"
+	if strings.HasPrefix(cmd, "/mcp") {
+		args := strings.Fields(cmd)
+		if len(args) > 1 {
+			switch args[1] {
+			case "list":
+				// Get MCPHub and show server connections
+				hub.GetMcpHub().PrintConnections()
+			case "reload":
+				// Reload MCP servers
+				hub.GetMcpHub().ReloadServers()
+				fmt.Println(utils.ColoredText("MCP servers reloaded", utils.ColorGreen))
+				// Show updated server connections
+				hub.GetMcpHub().PrintConnections()
+				logDebug("MCP reload command executed\n")
+			default:
+				fmt.Println("Unknown MCP command. Available commands: list, reload")
+			}
+		} else {
+			// If there's only "/mcp" without other arguments, show usage
+			fmt.Println("Usage: /mcp [list|reload]")
+		}
+		return
+	}
+
 	switch cmd {
 	case "/clear":
 		*conversation = []map[string]string{}
@@ -725,6 +754,8 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 		fmt.Println("               Usage: /config [set|unset|list] [--global] [key] [value]")
 		fmt.Println("  /checkpoint - Manage checkpoints")
 		fmt.Println("               Usage: /checkpoint [list|restore|redo] [checkpoint_id]")
+		fmt.Println("  /mcp        - Manage MCP server connections")
+		fmt.Println("               Usage: /mcp [list|reload]")
 		fmt.Println("  /exit       - Exit the program")
 		fmt.Println("  /help       - Show help information")
 		logDebug("Help information displayed\n")
@@ -1077,7 +1108,7 @@ func handleToolUse(toolUse map[string]interface{}) string {
 		result = core.ListCodeDefinitionNames(toolUse)
 	case "ask_followup_question":
 		result = core.FollowupQuestion(toolUse)
-	case "plan_mode_response":
+	case "ask_mode_response":
 		result = core.PlanModeResponse(toolUse)
 	case "git_commit":
 		result = core.GitCommit(toolUse)
@@ -1189,6 +1220,8 @@ func displayHelp() {
 	fmt.Println("               Usage: /config [set|unset|list] [--global] [key] [value]")
 	fmt.Println("  /checkpoint - Manage checkpoints")
 	fmt.Println("               Usage: /checkpoint [list|restore|redo] [checkpoint_id]")
+	fmt.Println("  /mcp        - Manage MCP server connections")
+	fmt.Println("               Usage: /mcp [list|reload]")
 	fmt.Println("  /exit       - Exit the program")
 	fmt.Println("  /help       - Show help information")
 }

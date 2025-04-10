@@ -222,7 +222,7 @@ func TestIsToolTag(t *testing.T) {
 		{"list_code_definition_names", true},
 		{"attempt_completion", true},
 		{"ask_followup_question", true},
-		{"plan_mode_response", true},
+		{"ask_mode_response", true},
 		{"git_commit", true},
 		{"div", false},
 		{"span", false},

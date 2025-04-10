@@ -717,7 +717,7 @@ func PlanModeResponse(params map[string]interface{}) string {
 	// Get the response content from the tool use parameters
 	response, ok := params["response"].(string)
 	if !ok || response == "" {
-		return "Error: No response provided for plan_mode_response tool"
+		return "Error: No response provided for ask_mode_response tool"
 	}
 
 	return response

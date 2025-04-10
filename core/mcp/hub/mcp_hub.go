@@ -8,6 +8,7 @@ import (
 	"github.com/pederhe/nca/config"
 	"github.com/pederhe/nca/core/mcp/client"
 	"github.com/pederhe/nca/core/mcp/common"
+	"github.com/pederhe/nca/utils"
 )
 
 // McpTransportType defines the MCP transport type
@@ -141,4 +142,26 @@ func (h *McpHub) printConnections() {
 
 		fmt.Println("--------------------------------")
 	}
+}
+
+// PrintConnections is the public version of printConnections
+func (h *McpHub) PrintConnections() {
+	if len(h.connections) == 0 {
+		fmt.Println("\nNo MCP servers currently connected")
+		fmt.Println("To add MCP servers, edit the MCP settings file at:")
+		fmt.Println(h.getMcpSettingsFilePath())
+		fmt.Println("\nMCP mode:", h.GetMode())
+		return
+	}
+
+	// Show MCP mode
+	fmt.Println("\nMCP mode:", utils.ColoredText(h.GetMode(), utils.ColorYellow))
+
+	// Call the internal print function
+	h.printConnections()
+}
+
+// ReloadServers reloads MCP servers
+func (h *McpHub) ReloadServers() {
+	h.initializeMcpServers()
 }

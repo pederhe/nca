@@ -19,7 +19,7 @@ func ParseToolUse(content string) map[string]interface{} {
 		"list_code_definition_names",
 		"attempt_completion",
 		"ask_followup_question",
-		"plan_mode_response",
+		"ask_mode_response",
 		"git_commit",
 		"fetch_web_content",
 		"find_files",
@@ -205,7 +205,7 @@ func ParseToolUse(content string) map[string]interface{} {
 			params["command"] = commandMatch[1]
 		}
 
-	case "plan_mode_response":
+	case "ask_mode_response":
 		responseMatch := regexp.MustCompile(`<response>([\s\S]*?)</response>`).FindStringSubmatch(toolBlock)
 		if len(responseMatch) > 1 {
 			params["response"] = responseMatch[1]
