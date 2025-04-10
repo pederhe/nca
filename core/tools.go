@@ -170,20 +170,41 @@ func ReplaceInFile(params map[string]interface{}) string {
 	originalContent := string(content)
 	fileContent := originalContent
 
-	// Parse and apply SEARCH/REPLACE blocks
-	// Use regex to match SEARCH/REPLACE blocks
-	re := regexp.MustCompile(`<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE`)
+	// Parse and apply SEARCH/REPLACE blocks - more flexible regex to handle different line endings
+	// This regex makes newlines optional around the markers to be more flexible
+	re := regexp.MustCompile(`<{7}\s*SEARCH\s*\n?([\s\S]*?)\n?\s*={7}\s*\n?([\s\S]*?)\n?\s*>{7}\s*REPLACE`)
 	matches := re.FindAllStringSubmatch(diff, -1)
 
 	if len(matches) == 0 {
-		return "Error: No valid SEARCH/REPLACE blocks found"
+		// Fall back to the original regex if the flexible one doesn't match
+		reOriginal := regexp.MustCompile(`<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE`)
+		matches = reOriginal.FindAllStringSubmatch(diff, -1)
+
+		if len(matches) == 0 {
+			// Try one more regex that doesn't require newlines
+			reLastAttempt := regexp.MustCompile(`<<<<<<< SEARCH([\s\S]*?)=======([\s\S]*?)>>>>>>> REPLACE`)
+			matches = reLastAttempt.FindAllStringSubmatch(diff, -1)
+
+			if len(matches) == 0 {
+				return "Error: No valid SEARCH/REPLACE blocks found. Format should be:\n<<<<<<< SEARCH\ntext to search\n=======\ntext to replace with\n>>>>>>> REPLACE"
+			}
+		}
 	}
 
 	// Apply each SEARCH/REPLACE block
 	for _, match := range matches {
 		search := match[1]
 		replace := match[2]
-		fileContent = strings.Replace(fileContent, search, replace, 1)
+
+		// Trim any leading/trailing whitespace to make the matching more robust
+		search = strings.TrimSpace(search)
+
+		// Do the replacement
+		if strings.Contains(fileContent, search) {
+			fileContent = strings.Replace(fileContent, search, replace, 1)
+		} else {
+			return fmt.Sprintf("Error: Could not find text to replace: '%s'", search)
+		}
 	}
 
 	// Write back to file
