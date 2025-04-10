@@ -48,6 +48,12 @@ var (
 	checkpointManager *core.CheckpointManager
 )
 
+// Mode selection: Agent or Ask
+var (
+	// true for Agent mode, false for Ask mode
+	isAgentMode = true
+)
+
 func main() {
 	// Initialize checkpoint manager
 	checkpointManager = core.NewCheckpointManager()
@@ -173,6 +179,17 @@ func main() {
 	}
 }
 
+func getEnvironmentDetails() string {
+	details := "\n\n# Current Mode\n"
+	if isAgentMode {
+		details += "AGENT MODE\n"
+	} else {
+		details += "ASK MODE\n"
+	}
+
+	return fmt.Sprintf("<environment_details>\n%s\n</environment_details>", details)
+}
+
 // Handle config command
 func handleConfigCommand(args []string) {
 	if len(args) == 0 {
@@ -248,7 +265,7 @@ func runREPL(initialPrompt string) {
 		handlePrompt(initialPrompt, &conversation)
 	} else {
 		fmt.Printf("NCA %s (%s,%s)\n", Version, BuildTime, CommitHash)
-		fmt.Println("Type /help for help")
+		fmt.Println("Press Ctrl+A to toggle between [Agent] and [Ask] mode")
 		if debugMode {
 			fmt.Print(utils.ColoredText("Debug mode enabled. Logs saved to: "+debugLogPath+"\n", utils.ColorYellow))
 		}
@@ -286,9 +303,17 @@ func runREPL(initialPrompt string) {
 		}
 	}
 
+	// Get the appropriate prompt prefix based on current mode
+	getPromptPrefix := func() string {
+		if isAgentMode {
+			return "[Agent]>>> "
+		}
+		return "[Ask]>>> "
+	}
+
 	// Initialize readline configuration
 	rl, err := readline.NewEx(&readline.Config{
-		Prompt:            utils.ColoredText(">>> ", utils.ColorPurple),
+		Prompt:            utils.ColoredText(getPromptPrefix(), utils.ColorPurple),
 		HistoryFile:       os.Getenv("HOME") + "/.nca_history",
 		InterruptPrompt:   "^C",
 		EOFPrompt:         "exit",
@@ -301,6 +326,28 @@ func runREPL(initialPrompt string) {
 		return
 	}
 	defer rl.Close()
+
+	// Set up Ctrl+A key handling for mode switching
+	// When user presses Ctrl+A, switch between Agent and Ask modes
+	oldHandler := rl.Config.FuncFilterInputRune
+	rl.Config.FuncFilterInputRune = func(r rune) (rune, bool) {
+		if r == 1 { // Ctrl+A key (ASCII 1)
+			// Only allow mode switching if not processing an API request
+			if !isProcessingAPIRequest {
+				isAgentMode = !isAgentMode
+				newPrompt := getPromptPrefix()
+				rl.SetPrompt(utils.ColoredText(newPrompt, utils.ColorPurple))
+				rl.Refresh()
+				logDebug(fmt.Sprintf("Mode switched to: %s\n", newPrompt))
+			}
+			return r, false // Don't add Ctrl+A to input
+		}
+		// Pass to original handler if set
+		if oldHandler != nil {
+			return oldHandler(r)
+		}
+		return r, true
+	}
 
 	// Set up signal handling
 	signalChan := make(chan os.Signal, 1)
@@ -358,7 +405,7 @@ func runREPL(initialPrompt string) {
 				clipboardMode = false
 				finalInput := multilineBuffer
 				multilineBuffer = ""
-				rl.SetPrompt(utils.ColoredText(">>> ", utils.ColorPurple))
+				rl.SetPrompt(utils.ColoredText(getPromptPrefix(), utils.ColorPurple))
 				if handleInput(finalInput, &conversation) {
 					break
 				}
@@ -375,8 +422,8 @@ func runREPL(initialPrompt string) {
 			// Empty line with accumulated multiline input means end of input
 			if strings.TrimSpace(input) == "" {
 				finalInput := multilineBuffer
-				multilineBuffer = ""                                       // Reset the buffer
-				rl.SetPrompt(utils.ColoredText(">>> ", utils.ColorPurple)) // Reset prompt to primary prompt
+				multilineBuffer = ""                                                  // Reset the buffer
+				rl.SetPrompt(utils.ColoredText(getPromptPrefix(), utils.ColorPurple)) // Reset prompt to primary prompt
 
 				// Handle the complete multiline input
 				if handleInput(finalInput, &conversation) {
@@ -501,11 +548,12 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 	// Add user message to conversation history
 	*conversation = append(*conversation, map[string]string{
 		"role":    "user",
-		"content": prompt,
+		"content": prompt + getEnvironmentDetails(),
 	})
 
 	// Log user input in debug mode
-	logDebug(fmt.Sprintf("USER INPUT: %s\n", prompt))
+	logDebug(fmt.Sprintf("USER INPUT (Mode: %s): %s\n",
+		map[bool]string{true: "Agent", false: "Ask"}[isAgentMode], prompt))
 
 	// Count of consecutive responses without tool use
 	noToolUseCount := 0
