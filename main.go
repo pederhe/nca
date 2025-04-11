@@ -180,14 +180,14 @@ func main() {
 }
 
 func getEnvironmentDetails() string {
-	details := "\n\n# Current Mode\n"
+	details := "\n# Current Mode\n"
 	if isAgentMode {
 		details += "AGENT MODE\n"
 	} else {
 		details += "ASK MODE\n"
 	}
 
-	return fmt.Sprintf("<environment_details>\n%s\n</environment_details>", details)
+	return fmt.Sprintf("\n\n<environment_details>\n%s\n</environment_details>", details)
 }
 
 // Handle config command
@@ -577,11 +577,11 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			fmt.Println("Error calling API:", err)
 			logDebug(fmt.Sprintf("API ERROR: %s\n", err))
 
-			// Remove the last user message to avoid consecutive user messages
-			// Models like DeepSeek-R1 don't support consecutive user messages
-			if len(*conversation) > 0 && (*conversation)[len(*conversation)-1]["role"] == "user" {
-				*conversation = (*conversation)[:len(*conversation)-1]
-			}
+			// Add error message to conversation history
+			*conversation = append(*conversation, map[string]string{
+				"role":    "assistant",
+				"content": err.Error(),
+			})
 
 			break
 		}
@@ -652,23 +652,23 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			// Check if exceeded 3 attempts without tool use
 			if noToolUseCount >= 3 {
 				errorMessage := "[FATAL ERROR] You failed to use a tool after 3 attempts. Exiting task."
-				//fmt.Println("\n" + errorMessage)
 				logDebug(fmt.Sprintf("ERROR: %s\n", errorMessage))
 				*conversation = append(*conversation, map[string]string{
 					"role":    "user",
 					"content": errorMessage,
 				})
+				fmt.Println(utils.ColoredText("The context length may have been exceeded. You can use /clear to clear the session history.", utils.ColorRed))
 				break
 			}
 
 			// No tool use request, add error message to conversation history
 			errorMessage := fmt.Sprintf("[ERROR] You did not use a tool in your previous response! Please retry with a tool use. (Attempt %d/3)", noToolUseCount)
-			//fmt.Println("\n" + errorMessage)
 			logDebug(fmt.Sprintf("ERROR: %s\n", errorMessage))
 			*conversation = append(*conversation, map[string]string{
 				"role":    "user",
 				"content": errorMessage,
 			})
+			fmt.Println(utils.ColoredText("No available tools found", utils.ColorRed))
 			// Don't exit loop, continue requesting AI to use a tool
 		}
 	}
@@ -969,7 +969,7 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 		apiErr = result.err
 	}
 
-	fmt.Println() // Add newline after streaming completes
+	//fmt.Println() // Add newline after streaming completes
 
 	// Log raw response in debug mode
 	if apiErr == nil {
@@ -1013,7 +1013,7 @@ func showLoadingAnimation(stop chan bool, done chan bool) {
 	i := 0
 
 	// Clear current line and display initial message
-	fmt.Print("\rGenerating... ")
+	fmt.Print("\r")
 
 	for {
 		select {
@@ -1024,7 +1024,7 @@ func showLoadingAnimation(stop chan bool, done chan bool) {
 			return
 		default:
 			// Display spinning animation
-			fmt.Printf("\rGenerating... %s", spinChars[i])
+			fmt.Printf("\r%s", spinChars[i])
 			i = (i + 1) % len(spinChars)
 			time.Sleep(100 * time.Millisecond)
 		}

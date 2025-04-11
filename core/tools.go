@@ -135,6 +135,7 @@ func WriteToFile(params map[string]interface{}) string {
 	if !ok {
 		return "Error: Missing file content parameter"
 	}
+	content = unescapeXML(content)
 
 	// Ensure directory exists
 	dir := filepath.Dir(path)
@@ -149,6 +150,15 @@ func WriteToFile(params map[string]interface{}) string {
 	return fmt.Sprintf("File successfully written: %s", path)
 }
 
+func unescapeXML(content string) string {
+	content = strings.ReplaceAll(content, "&lt;", "<")
+	content = strings.ReplaceAll(content, "&gt;", ">")
+	content = strings.ReplaceAll(content, "&amp;", "&")
+	content = strings.ReplaceAll(content, "&quot;", "\"")
+	content = strings.ReplaceAll(content, "&apos;", "'")
+	return content
+}
+
 // ReplaceInFile replaces content in a file
 func ReplaceInFile(params map[string]interface{}) string {
 	path, ok := params["path"].(string)
@@ -160,6 +170,7 @@ func ReplaceInFile(params map[string]interface{}) string {
 	if !ok {
 		return "Error: Missing diff parameter"
 	}
+	diff = unescapeXML(diff)
 
 	// Read original file content
 	content, err := os.ReadFile(path)
@@ -543,7 +554,8 @@ func ListFiles(params map[string]interface{}) string {
 }
 
 // ListCodeDefinitionNames lists code definition names in a directory
-// TODO: use language parser to extract definitions
+// TODO: use language parser to extract definitions, for example:
+// - use go doc to extract definitions in Go
 func ListCodeDefinitionNames(params map[string]interface{}) string {
 	path, ok := params["path"].(string)
 	if !ok {
