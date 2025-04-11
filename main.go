@@ -340,7 +340,7 @@ func runREPL(initialPrompt string) {
 				rl.Refresh()
 				logDebug(fmt.Sprintf("Mode switched to: %s\n", newPrompt))
 			}
-			return r, false // Don't add Ctrl+A to input
+			return r, true // rl.Close will block the program if we return false here
 		}
 		// Pass to original handler if set
 		if oldHandler != nil {
