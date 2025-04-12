@@ -287,7 +287,7 @@ func (f *XMLTagFilter) processOpeningTag(tag string) {
 		f.inSubTag = true
 		f.currentSubTag = tag
 
-		// Skip requires_approval tag
+		// Skip special tags
 		if isHiddenTag(tag) {
 			// Don't show this tag or its content
 			f.tagStack = append(f.tagStack, tag) // Still need to push to stack
@@ -361,8 +361,10 @@ func toolTagPrefix(tool string, tag string) string {
 		if tag == "path" {
 			return "Find "
 		}
+	case "attempt_completion":
+		return ""
 	}
-	return ""
+	return tag + ": "
 }
 
 // Check if a tag is a tool tag

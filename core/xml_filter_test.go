@@ -284,8 +284,8 @@ func TestToolTagPrefix(t *testing.T) {
 		{"list_files", "path", "List "},
 		{"list_code_definition_names", "path", "Code "},
 		{"git_commit", "message", "Git commit:\n"},
-		{"execute_command", "path", ""}, // Non-matching combination
-		{"unknown_tool", "command", ""}, // Unknown tool
+		{"execute_command", "path", "path: "},    // Non-matching combination
+		{"unknown_tool", "command", "command: "}, // Unknown tool
 	}
 
 	for _, tc := range testCases {

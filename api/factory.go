@@ -54,11 +54,11 @@ func GetProvider(providerType ProviderType) (types.Provider, error) {
 
 	switch providerType {
 	case DeepSeekProvider:
-		return providers.NewDeepSeekProvider(providerConfig), nil
+		return providers.NewDeepSeekProvider(providerConfig)
 	case QwenProvider:
-		return providers.NewQwenProvider(providerConfig), nil
+		return providers.NewQwenProvider(providerConfig)
 	case DouBaoProvider:
-		return providers.NewDouBaoProvider(providerConfig), nil
+		return providers.NewDouBaoProvider(providerConfig)
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}
@@ -66,7 +66,11 @@ func GetProvider(providerType ProviderType) (types.Provider, error) {
 
 // GetDefaultProvider returns the default provider based on configuration
 func GetDefaultProvider() (types.Provider, error) {
-	providerName := ""
+	providerName := config.Get("provider")
+	if providerName != "" {
+		return GetProvider(ProviderType(providerName))
+	}
+
 	// Determine provider based on model name keywords
 	model := config.Get("model")
 	if model != "" {

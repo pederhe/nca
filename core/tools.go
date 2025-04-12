@@ -724,8 +724,8 @@ func FollowupQuestion(params map[string]interface{}) string {
 	return ""
 }
 
-// PlanModeResponse handles responses in plan mode
-func PlanModeResponse(params map[string]interface{}) string {
+// AskModeResponse handles responses in plan mode
+func AskModeResponse(params map[string]interface{}) string {
 	// Get the response content from the tool use parameters
 	response, ok := params["response"].(string)
 	if !ok || response == "" {

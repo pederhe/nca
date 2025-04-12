@@ -52,6 +52,8 @@ var (
 var (
 	// true for Agent mode, false for Ask mode
 	isAgentMode = true
+	// number of times the conversation has been truncated
+	conversationTruncatedCount = 0
 )
 
 func main() {
@@ -253,6 +255,8 @@ func handleConfigCommand(args []string) {
 // Run interactive REPL
 func runREPL(initialPrompt string) {
 	conversation := []map[string]string{}
+	// Track truncation state
+	var currentDeletedRange [2]int
 
 	// Log REPL start in debug mode
 	logDebug("Starting REPL session\n")
@@ -262,7 +266,7 @@ func runREPL(initialPrompt string) {
 
 	// If there's an initial prompt, handle it first
 	if initialPrompt != "" {
-		handlePrompt(initialPrompt, &conversation)
+		handlePrompt(initialPrompt, &conversation, &currentDeletedRange)
 	} else {
 		fmt.Printf("NCA %s (%s,%s)\n", Version, BuildTime, CommitHash)
 		fmt.Println("Press Ctrl+A to toggle between [Agent] and [Ask] mode")
@@ -406,7 +410,7 @@ func runREPL(initialPrompt string) {
 				finalInput := multilineBuffer
 				multilineBuffer = ""
 				rl.SetPrompt(utils.ColoredText(getPromptPrefix(), utils.ColorPurple))
-				if handleInput(finalInput, &conversation) {
+				if handleInput(finalInput, &conversation, &currentDeletedRange) {
 					break
 				}
 				continue
@@ -426,7 +430,7 @@ func runREPL(initialPrompt string) {
 				rl.SetPrompt(utils.ColoredText(getPromptPrefix(), utils.ColorPurple)) // Reset prompt to primary prompt
 
 				// Handle the complete multiline input
-				if handleInput(finalInput, &conversation) {
+				if handleInput(finalInput, &conversation, &currentDeletedRange) {
 					break
 				}
 				continue
@@ -448,9 +452,17 @@ func runREPL(initialPrompt string) {
 			continue
 		}
 
+		lastLen := len(conversation)
 		// Handle single line input
-		if handleInput(input, &conversation) {
+		if handleInput(input, &conversation, &currentDeletedRange) {
 			break
+		}
+		if len(conversation) < lastLen {
+			conversationTruncatedCount++
+		}
+		if conversationTruncatedCount >= 3 {
+			// TODO use the previous conversation summary as the initial conversation for the new session
+			fmt.Println(utils.ColoredText("Use /clear to start a new conversation for better results.", utils.ColorCyan))
 		}
 	}
 
@@ -471,7 +483,7 @@ func handleExit(exitReason string) {
 }
 
 // Add a general function to handle input
-func handleInput(input string, conversation *[]map[string]string) bool {
+func handleInput(input string, conversation *[]map[string]string, currentDeletedRange *[2]int) bool {
 	// If it's a command
 	if strings.HasPrefix(input, "/") {
 		logDebug(fmt.Sprintf("Slash command: %s\n", input))
@@ -479,10 +491,10 @@ func handleInput(input string, conversation *[]map[string]string) bool {
 			handleExit("with /exit command")
 			return true // Indicates need to exit
 		}
-		handleSlashCommand(input, conversation)
+		handleSlashCommand(input, conversation, currentDeletedRange)
 	} else {
 		// Normal input processing
-		handlePrompt(input, conversation)
+		handlePrompt(input, conversation, currentDeletedRange)
 	}
 	return false // Indicates no need to exit
 }
@@ -490,7 +502,7 @@ func handleInput(input string, conversation *[]map[string]string) bool {
 // Run one-off query
 func runOneOffQuery(prompt string) {
 	conversation := []map[string]string{}
-
+	var currentDeletedRange [2]int
 	logDebug("Running one-off query mode\n")
 	logDebug(fmt.Sprintf("Query: %s\n", prompt))
 
@@ -515,7 +527,7 @@ func runOneOffQuery(prompt string) {
 		}
 	}()
 
-	handlePrompt(prompt, &conversation)
+	handlePrompt(prompt, &conversation, &currentDeletedRange)
 
 	// Clean up signal handling
 	signal.Stop(signalChan)
@@ -525,7 +537,7 @@ func runOneOffQuery(prompt string) {
 }
 
 // Handle user input prompt
-func handlePrompt(prompt string, conversation *[]map[string]string) {
+func handlePrompt(prompt string, conversation *[]map[string]string, currentDeletedRange *[2]int) {
 	// Create a checkpoint at the beginning of each prompt handling
 	checkpointManager.CreateCheckpoint(prompt)
 
@@ -571,8 +583,14 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			break
 		}
 
+		// Create API client
+		client, err := api.NewClient()
+		if err != nil {
+			fmt.Println("Error: Failed to create API client:", err)
+			break
+		}
 		// Call API
-		response, err := callAPI(*conversation)
+		response, err := callAPI(client, *conversation)
 		if err != nil {
 			fmt.Println("Error calling API:", err)
 			logDebug(fmt.Sprintf("API ERROR: %s\n", err))
@@ -586,6 +604,29 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			break
 		}
 		maxMessagesPerTask--
+
+		// if the finish_reason is "length", it means the context length is insufficient, so we need to cut off the previous conversation
+		if response.FinishReason == "length" {
+			newRange := core.GetNextTruncationRange(*conversation, *currentDeletedRange, "quarter")
+			// If we can't truncate any more messages, exit
+			if newRange[1] <= newRange[0] {
+				fmt.Println(utils.ColoredText("Context length exceeded and cannot be truncated further. Please use /clear to start a new conversation.", utils.ColorRed))
+				break
+			}
+
+			// Update current deleted range
+			*currentDeletedRange = newRange
+
+			// Create new conversation slice with truncated messages
+			// Keep messages before the truncation range and after the truncation range
+			*conversation = append((*conversation)[:newRange[0]], (*conversation)[newRange[1]+1:]...)
+
+			// Log truncation in debug mode
+			logDebug(fmt.Sprintf("Context truncated. Removed messages %d-%d\n", newRange[0], newRange[1]))
+
+			// Continue with truncated conversation
+			continue
+		}
 
 		// Check if there's a tool use request
 		toolUse := extractToolUse(response.Content)
@@ -657,7 +698,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 					"role":    "user",
 					"content": errorMessage,
 				})
-				fmt.Println(utils.ColoredText("The context length may have been exceeded. You can use /clear to clear the session history.", utils.ColorRed))
+				fmt.Println(utils.ColoredText("System error. You can use /clear to start a new conversation.", utils.ColorRed))
 				break
 			}
 
@@ -671,6 +712,8 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			fmt.Println(utils.ColoredText("No available tools found", utils.ColorRed))
 			// Don't exit loop, continue requesting AI to use a tool
 		}
+		// Update the context messages
+		core.UpdateContextMessages(client.GetModelInfo(), conversation, currentDeletedRange, response.Usage)
 	}
 }
 
@@ -735,7 +778,7 @@ func formatToolDescription(toolUse map[string]interface{}) string {
 }
 
 // Handle slash command
-func handleSlashCommand(cmd string, conversation *[]map[string]string) {
+func handleSlashCommand(cmd string, conversation *[]map[string]string, currentDeletedRange *[2]int) {
 	// Handle /checkpoint command
 	if strings.HasPrefix(cmd, "/checkpoint") {
 		args := strings.Fields(cmd)
@@ -792,6 +835,8 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 	switch cmd {
 	case "/clear":
 		*conversation = []map[string]string{}
+		*currentDeletedRange = [2]int{0, 0}
+		conversationTruncatedCount = 0
 		fmt.Println("Conversation history cleared")
 		fmt.Println(utils.ColoredText("----------------New Chat----------------", utils.ColorBlue))
 		logDebug("Conversation history cleared by user\n")
@@ -818,12 +863,14 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 
 // API response structure
 type APIResponse struct {
-	ReasoningContent string `json:"reasoning_content"`
-	Content          string `json:"content"`
+	ReasoningContent string       `json:"reasoning_content"`
+	Content          string       `json:"content"`
+	Usage            *types.Usage `json:"usage"`
+	FinishReason     string       `json:"finish_reason"`
 }
 
 // Call AI API
-func callAPI(conversation []map[string]string) (APIResponse, error) {
+func callAPI(client *api.Client, conversation []map[string]string) (APIResponse, error) {
 	// Set flag indicating an API request is being processed
 	isProcessingAPIRequest = true
 
@@ -875,13 +922,6 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 		logDebug(fmt.Sprintf("  [%d] %s: %s\n", i, msg.Role, content))
 	}
 
-	// Create API client
-	client, err := api.NewClient()
-	if err != nil {
-		fmt.Println("Error: Failed to create API client:", err)
-		os.Exit(1)
-	}
-
 	// Start dynamic loading animation
 	stopLoading := make(chan bool, 1)   // Use buffered channel to prevent blocking
 	animationDone := make(chan bool, 1) // Channel to confirm animation has stopped
@@ -898,6 +938,8 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	resultCh := make(chan struct {
 		reasoningContent string
 		content          string
+		usage            *types.Usage
+		finishReason     string
 		err              error
 	}, 1)
 
@@ -943,18 +985,32 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 		}
 
 		// Call API with streaming, passing the context
-		reasoningContent, content, err := client.ChatStream(ctx, messages, callback)
+		response, err := client.ChatStream(ctx, messages, callback)
+		if err != nil {
+			resultCh <- struct {
+				reasoningContent string
+				content          string
+				usage            *types.Usage
+				finishReason     string
+				err              error
+			}{"", "", nil, "", err}
+			return
+		}
 
 		// Send the result to the channel
 		resultCh <- struct {
 			reasoningContent string
 			content          string
+			usage            *types.Usage
+			finishReason     string
 			err              error
-		}{reasoningContent, content, err}
+		}{response.ReasoningContent, response.Content, response.Usage, response.FinishReason, nil}
 	}()
 
 	// Wait for the API call to complete or the context to be cancelled
 	var reasoningContent, content string
+	var usage *types.Usage
+	var finishReason string
 	var apiErr error
 
 	select {
@@ -966,6 +1022,8 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 		// API call completed
 		reasoningContent = result.reasoningContent
 		content = result.content
+		usage = result.usage
+		finishReason = result.finishReason
 		apiErr = result.err
 	}
 
@@ -993,6 +1051,8 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	return APIResponse{
 		ReasoningContent: reasoningContent,
 		Content:          content,
+		Usage:            usage,
+		FinishReason:     finishReason,
 	}, nil
 }
 
@@ -1157,7 +1217,7 @@ func handleToolUse(toolUse map[string]interface{}) string {
 	case "ask_followup_question":
 		result = core.FollowupQuestion(toolUse)
 	case "ask_mode_response":
-		result = core.PlanModeResponse(toolUse)
+		result = core.AskModeResponse(toolUse)
 	case "git_commit":
 		result = core.GitCommit(toolUse)
 	case "fetch_web_content":
