@@ -396,19 +396,19 @@ func TestFollowupQuestion(t *testing.T) {
 	assert.Contains(t, result, "Error: No question provided")
 }
 
-// Test PlanModeResponse function
-func TestPlanModeResponse(t *testing.T) {
+// Test AskModeResponse function
+func TestAskModeResponse(t *testing.T) {
 	testResponse := "This is a test response"
 	params := map[string]interface{}{
 		"response": testResponse,
 	}
 
-	result := PlanModeResponse(params)
+	result := AskModeResponse(params)
 	assert.Equal(t, testResponse, result)
 
 	// Test missing response parameter
 	params = map[string]interface{}{}
-	result = PlanModeResponse(params)
+	result = AskModeResponse(params)
 	assert.Contains(t, result, "Error: No response provided")
 }
 

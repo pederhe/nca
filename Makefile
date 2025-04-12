@@ -41,6 +41,13 @@ build:
 	$(GO) build $(LDFLAGS) -o $(OUTPUT_DIR)/$(PROJECT_NAME) $(MAIN_FILE)
 	@echo "Built $(PROJECT_NAME) to $(OUTPUT_DIR)/$(PROJECT_NAME)"
 
+# Build toolstest utility
+.PHONY: toolstest
+toolstest:
+	@mkdir -p $(OUTPUT_DIR)
+	$(GO) build -o $(OUTPUT_DIR)/toolstest cmd/toolstest/main.go
+	@echo "Built toolstest to $(OUTPUT_DIR)/toolstest"
+
 # Build binaries for all platforms
 .PHONY: build-all
 build-all:
@@ -96,6 +103,7 @@ help:
 	@echo "  make init       - Initialize Go module"
 	@echo "  make build      - Build binary for current platform"
 	@echo "  make build-all  - Build binaries for all supported platforms"
+	@echo "  make toolstest  - Build the tools testing utility"
 	@echo "  make test       - Run tests"
 	@echo "  make lint       - Run code checks"
 	@echo "  make clean      - Clean build artifacts"

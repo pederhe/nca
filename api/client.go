@@ -36,6 +36,14 @@ func NewClientWithProvider(providerType ProviderType) (*Client, error) {
 }
 
 // ChatStream sends a streaming conversation request to the AI API
-func (c *Client) ChatStream(ctx context.Context, messages []types.Message, callback func(string, string, bool)) (string, string, error) {
+func (c *Client) ChatStream(ctx context.Context, messages []types.Message, callback func(string, string, bool)) (*types.ChatStreamResponse, error) {
 	return c.provider.ChatStream(ctx, messages, callback)
+}
+
+func (c *Client) GetModelInfo() *types.ModelInfo {
+	return c.provider.GetModelInfo()
+}
+
+func (c *Client) GetName() string {
+	return c.provider.GetName()
 }

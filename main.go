@@ -17,6 +17,7 @@ import (
 	"github.com/pederhe/nca/api/types"
 	"github.com/pederhe/nca/config"
 	"github.com/pederhe/nca/core"
+	"github.com/pederhe/nca/core/mcp/hub"
 	"github.com/pederhe/nca/utils"
 )
 
@@ -47,6 +48,14 @@ var (
 	checkpointManager *core.CheckpointManager
 )
 
+// Mode selection: Agent or Ask
+var (
+	// true for Agent mode, false for Ask mode
+	isAgentMode = true
+	// number of times the conversation has been truncated
+	conversationTruncatedCount = 0
+)
+
 func main() {
 	// Initialize checkpoint manager
 	checkpointManager = core.NewCheckpointManager()
@@ -55,6 +64,10 @@ func main() {
 	if err := checkpointManager.LoadCheckpoints(); err != nil {
 		fmt.Printf("Warning: Failed to load checkpoints: %s\n", err)
 	}
+
+	// Initialize MCP hub
+	mcpHub := hub.GetMcpHub()
+	defer mcpHub.Dispose()
 
 	// No longer initialize signal handling here, let the readline library handle signals
 
@@ -168,6 +181,17 @@ func main() {
 	}
 }
 
+func getEnvironmentDetails() string {
+	details := "\n# Current Mode\n"
+	if isAgentMode {
+		details += "AGENT MODE\n"
+	} else {
+		details += "ASK MODE\n"
+	}
+
+	return fmt.Sprintf("\n\n<environment_details>\n%s\n</environment_details>", details)
+}
+
 // Handle config command
 func handleConfigCommand(args []string) {
 	if len(args) == 0 {
@@ -231,6 +255,8 @@ func handleConfigCommand(args []string) {
 // Run interactive REPL
 func runREPL(initialPrompt string) {
 	conversation := []map[string]string{}
+	// Track truncation state
+	var currentDeletedRange [2]int
 
 	// Log REPL start in debug mode
 	logDebug("Starting REPL session\n")
@@ -240,10 +266,10 @@ func runREPL(initialPrompt string) {
 
 	// If there's an initial prompt, handle it first
 	if initialPrompt != "" {
-		handlePrompt(initialPrompt, &conversation)
+		handlePrompt(initialPrompt, &conversation, &currentDeletedRange)
 	} else {
 		fmt.Printf("NCA %s (%s,%s)\n", Version, BuildTime, CommitHash)
-		fmt.Println("Type /help for help")
+		fmt.Println("Press Ctrl+A to toggle between [Agent] and [Ask] mode")
 		if debugMode {
 			fmt.Print(utils.ColoredText("Debug mode enabled. Logs saved to: "+debugLogPath+"\n", utils.ColorYellow))
 		}
@@ -263,6 +289,10 @@ func runREPL(initialPrompt string) {
 			readline.PcItem("list"),
 			readline.PcItem("--global"),
 		),
+		readline.PcItem("/mcp",
+			readline.PcItem("list"),
+			readline.PcItem("reload"),
+		),
 		readline.PcItem("/help"),
 		readline.PcItem("/exit"),
 	)
@@ -277,9 +307,17 @@ func runREPL(initialPrompt string) {
 		}
 	}
 
+	// Get the appropriate prompt prefix based on current mode
+	getPromptPrefix := func() string {
+		if isAgentMode {
+			return "[Agent]>>> "
+		}
+		return "[Ask]>>> "
+	}
+
 	// Initialize readline configuration
 	rl, err := readline.NewEx(&readline.Config{
-		Prompt:            utils.ColoredText(">>> ", utils.ColorPurple),
+		Prompt:            utils.ColoredText(getPromptPrefix(), utils.ColorPurple),
 		HistoryFile:       os.Getenv("HOME") + "/.nca_history",
 		InterruptPrompt:   "^C",
 		EOFPrompt:         "exit",
@@ -292,6 +330,28 @@ func runREPL(initialPrompt string) {
 		return
 	}
 	defer rl.Close()
+
+	// Set up Ctrl+A key handling for mode switching
+	// When user presses Ctrl+A, switch between Agent and Ask modes
+	oldHandler := rl.Config.FuncFilterInputRune
+	rl.Config.FuncFilterInputRune = func(r rune) (rune, bool) {
+		if r == 1 { // Ctrl+A key (ASCII 1)
+			// Only allow mode switching if not processing an API request
+			if !isProcessingAPIRequest {
+				isAgentMode = !isAgentMode
+				newPrompt := getPromptPrefix()
+				rl.SetPrompt(utils.ColoredText(newPrompt, utils.ColorPurple))
+				rl.Refresh()
+				logDebug(fmt.Sprintf("Mode switched to: %s\n", newPrompt))
+			}
+			return r, true // rl.Close will block the program if we return false here
+		}
+		// Pass to original handler if set
+		if oldHandler != nil {
+			return oldHandler(r)
+		}
+		return r, true
+	}
 
 	// Set up signal handling
 	signalChan := make(chan os.Signal, 1)
@@ -349,8 +409,8 @@ func runREPL(initialPrompt string) {
 				clipboardMode = false
 				finalInput := multilineBuffer
 				multilineBuffer = ""
-				rl.SetPrompt(utils.ColoredText(">>> ", utils.ColorPurple))
-				if handleInput(finalInput, &conversation) {
+				rl.SetPrompt(utils.ColoredText(getPromptPrefix(), utils.ColorPurple))
+				if handleInput(finalInput, &conversation, &currentDeletedRange) {
 					break
 				}
 				continue
@@ -366,11 +426,11 @@ func runREPL(initialPrompt string) {
 			// Empty line with accumulated multiline input means end of input
 			if strings.TrimSpace(input) == "" {
 				finalInput := multilineBuffer
-				multilineBuffer = ""                                       // Reset the buffer
-				rl.SetPrompt(utils.ColoredText(">>> ", utils.ColorPurple)) // Reset prompt to primary prompt
+				multilineBuffer = ""                                                  // Reset the buffer
+				rl.SetPrompt(utils.ColoredText(getPromptPrefix(), utils.ColorPurple)) // Reset prompt to primary prompt
 
 				// Handle the complete multiline input
-				if handleInput(finalInput, &conversation) {
+				if handleInput(finalInput, &conversation, &currentDeletedRange) {
 					break
 				}
 				continue
@@ -392,9 +452,17 @@ func runREPL(initialPrompt string) {
 			continue
 		}
 
+		lastLen := len(conversation)
 		// Handle single line input
-		if handleInput(input, &conversation) {
+		if handleInput(input, &conversation, &currentDeletedRange) {
 			break
+		}
+		if len(conversation) < lastLen {
+			conversationTruncatedCount++
+		}
+		if conversationTruncatedCount >= 3 {
+			// TODO use the previous conversation summary as the initial conversation for the new session
+			fmt.Println(utils.ColoredText("Use /clear to start a new conversation for better results.", utils.ColorCyan))
 		}
 	}
 
@@ -415,7 +483,7 @@ func handleExit(exitReason string) {
 }
 
 // Add a general function to handle input
-func handleInput(input string, conversation *[]map[string]string) bool {
+func handleInput(input string, conversation *[]map[string]string, currentDeletedRange *[2]int) bool {
 	// If it's a command
 	if strings.HasPrefix(input, "/") {
 		logDebug(fmt.Sprintf("Slash command: %s\n", input))
@@ -423,10 +491,10 @@ func handleInput(input string, conversation *[]map[string]string) bool {
 			handleExit("with /exit command")
 			return true // Indicates need to exit
 		}
-		handleSlashCommand(input, conversation)
+		handleSlashCommand(input, conversation, currentDeletedRange)
 	} else {
 		// Normal input processing
-		handlePrompt(input, conversation)
+		handlePrompt(input, conversation, currentDeletedRange)
 	}
 	return false // Indicates no need to exit
 }
@@ -434,7 +502,7 @@ func handleInput(input string, conversation *[]map[string]string) bool {
 // Run one-off query
 func runOneOffQuery(prompt string) {
 	conversation := []map[string]string{}
-
+	var currentDeletedRange [2]int
 	logDebug("Running one-off query mode\n")
 	logDebug(fmt.Sprintf("Query: %s\n", prompt))
 
@@ -459,7 +527,7 @@ func runOneOffQuery(prompt string) {
 		}
 	}()
 
-	handlePrompt(prompt, &conversation)
+	handlePrompt(prompt, &conversation, &currentDeletedRange)
 
 	// Clean up signal handling
 	signal.Stop(signalChan)
@@ -469,7 +537,7 @@ func runOneOffQuery(prompt string) {
 }
 
 // Handle user input prompt
-func handlePrompt(prompt string, conversation *[]map[string]string) {
+func handlePrompt(prompt string, conversation *[]map[string]string, currentDeletedRange *[2]int) {
 	// Create a checkpoint at the beginning of each prompt handling
 	checkpointManager.CreateCheckpoint(prompt)
 
@@ -492,11 +560,12 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 	// Add user message to conversation history
 	*conversation = append(*conversation, map[string]string{
 		"role":    "user",
-		"content": prompt,
+		"content": prompt + getEnvironmentDetails(),
 	})
 
 	// Log user input in debug mode
-	logDebug(fmt.Sprintf("USER INPUT: %s\n", prompt))
+	logDebug(fmt.Sprintf("USER INPUT (Mode: %s): %s\n",
+		map[bool]string{true: "Agent", false: "Ask"}[isAgentMode], prompt))
 
 	// Count of consecutive responses without tool use
 	noToolUseCount := 0
@@ -514,21 +583,50 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			break
 		}
 
+		// Create API client
+		client, err := api.NewClient()
+		if err != nil {
+			fmt.Println("Error: Failed to create API client:", err)
+			break
+		}
 		// Call API
-		response, err := callAPI(*conversation)
+		response, err := callAPI(client, *conversation)
 		if err != nil {
 			fmt.Println("Error calling API:", err)
 			logDebug(fmt.Sprintf("API ERROR: %s\n", err))
 
-			// Remove the last user message to avoid consecutive user messages
-			// Models like DeepSeek-R1 don't support consecutive user messages
-			if len(*conversation) > 0 && (*conversation)[len(*conversation)-1]["role"] == "user" {
-				*conversation = (*conversation)[:len(*conversation)-1]
-			}
+			// Add error message to conversation history
+			*conversation = append(*conversation, map[string]string{
+				"role":    "assistant",
+				"content": err.Error(),
+			})
 
 			break
 		}
 		maxMessagesPerTask--
+
+		// if the finish_reason is "length", it means the context length is insufficient, so we need to cut off the previous conversation
+		if response.FinishReason == "length" {
+			newRange := core.GetNextTruncationRange(*conversation, *currentDeletedRange, "quarter")
+			// If we can't truncate any more messages, exit
+			if newRange[1] <= newRange[0] {
+				fmt.Println(utils.ColoredText("Context length exceeded and cannot be truncated further. Please use /clear to start a new conversation.", utils.ColorRed))
+				break
+			}
+
+			// Update current deleted range
+			*currentDeletedRange = newRange
+
+			// Create new conversation slice with truncated messages
+			// Keep messages before the truncation range and after the truncation range
+			*conversation = append((*conversation)[:newRange[0]], (*conversation)[newRange[1]+1:]...)
+
+			// Log truncation in debug mode
+			logDebug(fmt.Sprintf("Context truncated. Removed messages %d-%d\n", newRange[0], newRange[1]))
+
+			// Continue with truncated conversation
+			continue
+		}
 
 		// Check if there's a tool use request
 		toolUse := extractToolUse(response.Content)
@@ -567,7 +665,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 				// Task completed, exit loop
 				break
 			}
-			if toolName == "plan_mode_response" || toolName == "ask_followup_question" {
+			if toolName == "ask_mode_response" || toolName == "ask_followup_question" {
 				// Task completed, exit loop
 				break
 			}
@@ -595,25 +693,27 @@ func handlePrompt(prompt string, conversation *[]map[string]string) {
 			// Check if exceeded 3 attempts without tool use
 			if noToolUseCount >= 3 {
 				errorMessage := "[FATAL ERROR] You failed to use a tool after 3 attempts. Exiting task."
-				//fmt.Println("\n" + errorMessage)
 				logDebug(fmt.Sprintf("ERROR: %s\n", errorMessage))
 				*conversation = append(*conversation, map[string]string{
 					"role":    "user",
 					"content": errorMessage,
 				})
+				fmt.Println(utils.ColoredText("System error. You can use /clear to start a new conversation.", utils.ColorRed))
 				break
 			}
 
 			// No tool use request, add error message to conversation history
 			errorMessage := fmt.Sprintf("[ERROR] You did not use a tool in your previous response! Please retry with a tool use. (Attempt %d/3)", noToolUseCount)
-			//fmt.Println("\n" + errorMessage)
 			logDebug(fmt.Sprintf("ERROR: %s\n", errorMessage))
 			*conversation = append(*conversation, map[string]string{
 				"role":    "user",
 				"content": errorMessage,
 			})
+			fmt.Println(utils.ColoredText("No available tools found", utils.ColorRed))
 			// Don't exit loop, continue requesting AI to use a tool
 		}
+		// Update the context messages
+		core.UpdateContextMessages(client.GetModelInfo(), conversation, currentDeletedRange, response.Usage)
 	}
 }
 
@@ -625,8 +725,8 @@ func formatToolDescription(toolUse map[string]interface{}) string {
 	case "attempt_completion":
 		return "[attempt_completion]"
 
-	case "plan_mode_response":
-		return "[plan_mode_response]"
+	case "ask_mode_response":
+		return "[ask_mode_response]"
 
 	case "ask_followup_question":
 		question, _ := toolUse["question"].(string)
@@ -659,6 +759,16 @@ func formatToolDescription(toolUse map[string]interface{}) string {
 
 		return fmt.Sprintf("[%s for message '%s']", toolName, message)
 
+	case "use_mcp_tool":
+		serverName, _ := toolUse["server_name"].(string)
+		toolNameParam, _ := toolUse["tool_name"].(string)
+		return fmt.Sprintf("[%s for server '%s', tool '%s']", toolName, serverName, toolNameParam)
+
+	case "access_mcp_resource":
+		serverName, _ := toolUse["server_name"].(string)
+		uri, _ := toolUse["uri"].(string)
+		return fmt.Sprintf("[%s for server '%s', uri '%s']", toolName, serverName, uri)
+
 	case "find_files":
 		return "[find_files]"
 
@@ -668,7 +778,7 @@ func formatToolDescription(toolUse map[string]interface{}) string {
 }
 
 // Handle slash command
-func handleSlashCommand(cmd string, conversation *[]map[string]string) {
+func handleSlashCommand(cmd string, conversation *[]map[string]string, currentDeletedRange *[2]int) {
 	// Handle /checkpoint command
 	if strings.HasPrefix(cmd, "/checkpoint") {
 		args := strings.Fields(cmd)
@@ -697,9 +807,36 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 		return
 	}
 
+	// Handle /mcp command, format: "/mcp [list|reload]"
+	if strings.HasPrefix(cmd, "/mcp") {
+		args := strings.Fields(cmd)
+		if len(args) > 1 {
+			switch args[1] {
+			case "list":
+				// Get MCPHub and show server connections
+				hub.GetMcpHub().PrintConnections()
+			case "reload":
+				// Reload MCP servers
+				hub.GetMcpHub().ReloadServers()
+				fmt.Println(utils.ColoredText("MCP servers reloaded", utils.ColorGreen))
+				// Show updated server connections
+				hub.GetMcpHub().PrintConnections()
+				logDebug("MCP reload command executed\n")
+			default:
+				fmt.Println("Unknown MCP command. Available commands: list, reload")
+			}
+		} else {
+			// If there's only "/mcp" without other arguments, show usage
+			fmt.Println("Usage: /mcp [list|reload]")
+		}
+		return
+	}
+
 	switch cmd {
 	case "/clear":
 		*conversation = []map[string]string{}
+		*currentDeletedRange = [2]int{0, 0}
+		conversationTruncatedCount = 0
 		fmt.Println("Conversation history cleared")
 		fmt.Println(utils.ColoredText("----------------New Chat----------------", utils.ColorBlue))
 		logDebug("Conversation history cleared by user\n")
@@ -710,6 +847,8 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 		fmt.Println("               Usage: /config [set|unset|list] [--global] [key] [value]")
 		fmt.Println("  /checkpoint - Manage checkpoints")
 		fmt.Println("               Usage: /checkpoint [list|restore|redo] [checkpoint_id]")
+		fmt.Println("  /mcp        - Manage MCP server connections")
+		fmt.Println("               Usage: /mcp [list|reload]")
 		fmt.Println("  /exit       - Exit the program")
 		fmt.Println("  /help       - Show help information")
 		logDebug("Help information displayed\n")
@@ -724,12 +863,14 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string) {
 
 // API response structure
 type APIResponse struct {
-	ReasoningContent string `json:"reasoning_content"`
-	Content          string `json:"content"`
+	ReasoningContent string       `json:"reasoning_content"`
+	Content          string       `json:"content"`
+	Usage            *types.Usage `json:"usage"`
+	FinishReason     string       `json:"finish_reason"`
 }
 
 // Call AI API
-func callAPI(conversation []map[string]string) (APIResponse, error) {
+func callAPI(client *api.Client, conversation []map[string]string) (APIResponse, error) {
 	// Set flag indicating an API request is being processed
 	isProcessingAPIRequest = true
 
@@ -781,13 +922,6 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 		logDebug(fmt.Sprintf("  [%d] %s: %s\n", i, msg.Role, content))
 	}
 
-	// Create API client
-	client, err := api.NewClient()
-	if err != nil {
-		fmt.Println("Error: Failed to create API client:", err)
-		os.Exit(1)
-	}
-
 	// Start dynamic loading animation
 	stopLoading := make(chan bool, 1)   // Use buffered channel to prevent blocking
 	animationDone := make(chan bool, 1) // Channel to confirm animation has stopped
@@ -804,6 +938,8 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	resultCh := make(chan struct {
 		reasoningContent string
 		content          string
+		usage            *types.Usage
+		finishReason     string
 		err              error
 	}, 1)
 
@@ -819,17 +955,16 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 				// Continue normal processing
 			}
 
-			// Stop loading animation when first response chunk is received
-			if (len(reasoningChunk) > 0 || len(chunk) > 0) && !animationStopped {
-				stopLoading <- true
-				<-animationDone // Wait for animation to actually stop
-				animationStopped = true
-			}
-
 			if reasoningChunk != "" {
 				if !startReasoning {
 					startReasoning = true
 					fmt.Println(utils.ColoredText("Reasoning:", utils.ColorBlue))
+				}
+				// Stop loading animation when first reasoning chunk is received
+				if len(reasoningChunk) > 0 && !animationStopped {
+					stopLoading <- true
+					<-animationDone // Wait for animation to actually stop
+					animationStopped = true
 				}
 				fmt.Print(reasoningChunk)
 			} else if chunk != "" {
@@ -839,23 +974,43 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 				}
 				// Filter and print the chunk
 				filtered := filter.ProcessChunk(chunk)
+				// Stop loading animation when first available chunk is received
+				if len(filtered) > 0 && !animationStopped {
+					stopLoading <- true
+					<-animationDone // Wait for animation to actually stop
+					animationStopped = true
+				}
 				fmt.Print(filtered)
 			}
 		}
 
 		// Call API with streaming, passing the context
-		reasoningContent, content, err := client.ChatStream(ctx, messages, callback)
+		response, err := client.ChatStream(ctx, messages, callback)
+		if err != nil {
+			resultCh <- struct {
+				reasoningContent string
+				content          string
+				usage            *types.Usage
+				finishReason     string
+				err              error
+			}{"", "", nil, "", err}
+			return
+		}
 
 		// Send the result to the channel
 		resultCh <- struct {
 			reasoningContent string
 			content          string
+			usage            *types.Usage
+			finishReason     string
 			err              error
-		}{reasoningContent, content, err}
+		}{response.ReasoningContent, response.Content, response.Usage, response.FinishReason, nil}
 	}()
 
 	// Wait for the API call to complete or the context to be cancelled
 	var reasoningContent, content string
+	var usage *types.Usage
+	var finishReason string
 	var apiErr error
 
 	select {
@@ -867,10 +1022,12 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 		// API call completed
 		reasoningContent = result.reasoningContent
 		content = result.content
+		usage = result.usage
+		finishReason = result.finishReason
 		apiErr = result.err
 	}
 
-	fmt.Println() // Add newline after streaming completes
+	//fmt.Println() // Add newline after streaming completes
 
 	// Log raw response in debug mode
 	if apiErr == nil {
@@ -894,6 +1051,8 @@ func callAPI(conversation []map[string]string) (APIResponse, error) {
 	return APIResponse{
 		ReasoningContent: reasoningContent,
 		Content:          content,
+		Usage:            usage,
+		FinishReason:     finishReason,
 	}, nil
 }
 
@@ -914,7 +1073,7 @@ func showLoadingAnimation(stop chan bool, done chan bool) {
 	i := 0
 
 	// Clear current line and display initial message
-	fmt.Print("\rGenerating... ")
+	fmt.Print("\r")
 
 	for {
 		select {
@@ -925,7 +1084,7 @@ func showLoadingAnimation(stop chan bool, done chan bool) {
 			return
 		default:
 			// Display spinning animation
-			fmt.Printf("\rGenerating... %s", spinChars[i])
+			fmt.Printf("\r%s", spinChars[i])
 			i = (i + 1) % len(spinChars)
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -1057,14 +1216,18 @@ func handleToolUse(toolUse map[string]interface{}) string {
 		result = core.ListCodeDefinitionNames(toolUse)
 	case "ask_followup_question":
 		result = core.FollowupQuestion(toolUse)
-	case "plan_mode_response":
-		result = core.PlanModeResponse(toolUse)
+	case "ask_mode_response":
+		result = core.AskModeResponse(toolUse)
 	case "git_commit":
 		result = core.GitCommit(toolUse)
 	case "fetch_web_content":
 		result = core.FetchWebContent(toolUse)
 	case "find_files":
 		result = core.FindFiles(toolUse)
+	case "use_mcp_tool":
+		result = core.UseMcpTool(toolUse)
+	case "access_mcp_resource":
+		result = core.AccessMcpResource(toolUse)
 	default:
 		result = fmt.Sprintf("Error: Unknown tool '%s'", toolName)
 	}
@@ -1165,6 +1328,8 @@ func displayHelp() {
 	fmt.Println("               Usage: /config [set|unset|list] [--global] [key] [value]")
 	fmt.Println("  /checkpoint - Manage checkpoints")
 	fmt.Println("               Usage: /checkpoint [list|restore|redo] [checkpoint_id]")
+	fmt.Println("  /mcp        - Manage MCP server connections")
+	fmt.Println("               Usage: /mcp [list|reload]")
 	fmt.Println("  /exit       - Exit the program")
 	fmt.Println("  /help       - Show help information")
 }

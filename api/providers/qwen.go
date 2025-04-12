@@ -24,11 +24,14 @@ type QwenProvider struct {
 
 // ChatRequest represents a request to the Qwen API
 type qwenChatRequest struct {
-	Model       string          `json:"model"`
-	Messages    []types.Message `json:"messages"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Stream      bool            `json:"stream,omitempty"`
-	Temperature float64         `json:"temperature,omitempty"`
+	Model         string          `json:"model"`
+	Messages      []types.Message `json:"messages"`
+	MaxTokens     int             `json:"max_tokens,omitempty"`
+	Stream        bool            `json:"stream,omitempty"`
+	Temperature   float64         `json:"temperature,omitempty"`
+	StreamOptions *struct {
+		IncludeUsage bool `json:"include_usage,omitempty"`
+	} `json:"stream_options,omitempty"`
 }
 
 // StreamResponse represents a streaming response chunk from Qwen
@@ -46,15 +49,11 @@ type qwenStreamResponse struct {
 		FinishReason string `json:"finish_reason"`
 		Index        int    `json:"index"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage,omitempty"`
+	Usage *types.Usage `json:"usage,omitempty"`
 }
 
 // NewQwenProvider creates a new Qwen provider
-func NewQwenProvider(config types.ProviderConfig) *QwenProvider {
+func NewQwenProvider(config types.ProviderConfig) (*QwenProvider, error) {
 	// Set default values if not provided
 	baseURL := config.APIBaseURL
 	if baseURL == "" {
@@ -71,13 +70,19 @@ func NewQwenProvider(config types.ProviderConfig) *QwenProvider {
 		timeout = types.DefaultTimeout
 	}
 
-	return &QwenProvider{
+	provider := &QwenProvider{
 		apiKey:               config.APIKey,
 		apiBaseURL:           baseURL,
 		model:                model,
 		temperature:          config.Temperature,
 		disableStreamTimeout: config.DisableStreamTimeout,
 	}
+
+	if provider.GetModelInfo() == nil {
+		return nil, fmt.Errorf("model %s not found", model)
+	}
+
+	return provider, nil
 }
 
 // GetName returns the name of the provider
@@ -85,10 +90,23 @@ func (p *QwenProvider) GetName() string {
 	return "qwen"
 }
 
+// GetModelInfo returns information about the model
+func (p *QwenProvider) GetModelInfo() *types.ModelInfo {
+	modelInfo, ok := types.MainlandQwenModels[types.QwenModelID(p.model)]
+	if !ok {
+		modelInfo, ok = types.InternationalQwenModels[types.QwenModelID(p.model)]
+		if !ok {
+			return nil
+		}
+	}
+	modelInfo.Name = p.model
+	return &modelInfo
+}
+
 // ChatStream sends a streaming conversation request to the Qwen API
-func (p *QwenProvider) ChatStream(ctx context.Context, messages []types.Message, callback func(string, string, bool)) (string, string, error) {
+func (p *QwenProvider) ChatStream(ctx context.Context, messages []types.Message, callback func(string, string, bool)) (*types.ChatStreamResponse, error) {
 	if p.apiKey == "" {
-		return "", "", fmt.Errorf("API key not set for Qwen provider")
+		return nil, fmt.Errorf("API key not set for Qwen provider")
 	}
 
 	reqBody := qwenChatRequest{
@@ -96,17 +114,22 @@ func (p *QwenProvider) ChatStream(ctx context.Context, messages []types.Message,
 		Messages:    messages,
 		Stream:      true,
 		Temperature: p.temperature,
+		StreamOptions: &struct {
+			IncludeUsage bool `json:"include_usage,omitempty"`
+		}{
+			IncludeUsage: true,
+		},
 	}
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
 	// Create request with context
 	req, err := http.NewRequestWithContext(ctx, "POST", p.apiBaseURL+"/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -132,20 +155,22 @@ func (p *QwenProvider) ChatStream(ctx context.Context, messages []types.Message,
 	if err != nil {
 		// Check if the error is due to context cancellation
 		if ctx.Err() != nil {
-			return "", "", ctx.Err()
+			return nil, ctx.Err()
 		}
-		return "", "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", "", fmt.Errorf("Qwen API error: %s", string(body))
+		return nil, fmt.Errorf("Qwen API error: %s", string(body))
 	}
 
 	reader := bufio.NewReader(resp.Body)
 	var fullContent strings.Builder
 	var fullReasoningContent strings.Builder
+	var finalUsage *types.Usage
+	var finishReason string
 
 	// Create a channel for handling context cancellation
 	done := make(chan struct{})
@@ -166,7 +191,12 @@ func (p *QwenProvider) ChatStream(ctx context.Context, messages []types.Message,
 		// Check if context has been cancelled
 		select {
 		case <-ctx.Done():
-			return fullReasoningContent.String(), fullContent.String(), ctx.Err()
+			return &types.ChatStreamResponse{
+				ReasoningContent: fullReasoningContent.String(),
+				Content:          fullContent.String(),
+				Usage:            finalUsage,
+				FinishReason:     finishReason,
+			}, ctx.Err()
 		default:
 			// Continue processing
 		}
@@ -178,14 +208,28 @@ func (p *QwenProvider) ChatStream(ctx context.Context, messages []types.Message,
 			}
 			// Check if the error is due to context cancellation
 			if ctx.Err() != nil {
-				return fullReasoningContent.String(), fullContent.String(), ctx.Err()
+				return &types.ChatStreamResponse{
+					ReasoningContent: fullReasoningContent.String(),
+					Content:          fullContent.String(),
+					Usage:            finalUsage,
+					FinishReason:     finishReason,
+				}, ctx.Err()
 			}
-			return fullReasoningContent.String(), fullContent.String(), err
+			return &types.ChatStreamResponse{
+				ReasoningContent: fullReasoningContent.String(),
+				Content:          fullContent.String(),
+				Usage:            finalUsage,
+				FinishReason:     finishReason,
+			}, err
 		}
 
 		line = strings.TrimSpace(line)
-		if line == "" || line == "data: [DONE]" {
+		if line == "" {
 			continue
+		}
+
+		if line == "data: [DONE]" {
+			break
 		}
 
 		if !strings.HasPrefix(line, "data: ") {
@@ -196,6 +240,12 @@ func (p *QwenProvider) ChatStream(ctx context.Context, messages []types.Message,
 		var streamResp qwenStreamResponse
 		if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
 			continue
+		}
+
+		// If this is the final block with usage but no choices
+		if len(streamResp.Choices) == 0 && streamResp.Usage != nil {
+			finalUsage = streamResp.Usage
+			break
 		}
 
 		if len(streamResp.Choices) == 0 {
@@ -214,12 +264,17 @@ func (p *QwenProvider) ChatStream(ctx context.Context, messages []types.Message,
 			fullContent.WriteString(content)
 		}
 
-		callback(reasoningContent, content, isDone)
-
 		if isDone {
-			break
+			finishReason = streamResp.Choices[0].FinishReason
 		}
+
+		callback(reasoningContent, content, isDone)
 	}
 
-	return fullReasoningContent.String(), fullContent.String(), nil
+	return &types.ChatStreamResponse{
+		ReasoningContent: fullReasoningContent.String(),
+		Content:          fullContent.String(),
+		Usage:            finalUsage,
+		FinishReason:     finishReason,
+	}, nil
 }

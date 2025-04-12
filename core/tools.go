@@ -3,6 +3,7 @@ package core
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/pederhe/nca/config"
+	"github.com/pederhe/nca/core/mcp/common"
+	"github.com/pederhe/nca/core/mcp/hub"
 	"github.com/pederhe/nca/utils"
 )
 
@@ -38,6 +41,8 @@ func ExecuteCommand(params map[string]interface{}) string {
 	if len(parts) == 0 {
 		return "Error: Empty command"
 	}
+	// If the command contains semicolons, execute it through bash
+	// This allows for command chaining like "cd /tmp; ls -la"
 	if strings.Contains(command, ";") {
 		parts = []string{"bash", "-c", command}
 	}
@@ -130,6 +135,7 @@ func WriteToFile(params map[string]interface{}) string {
 	if !ok {
 		return "Error: Missing file content parameter"
 	}
+	content = unescapeXML(content)
 
 	// Ensure directory exists
 	dir := filepath.Dir(path)
@@ -144,6 +150,15 @@ func WriteToFile(params map[string]interface{}) string {
 	return fmt.Sprintf("File successfully written: %s", path)
 }
 
+func unescapeXML(content string) string {
+	content = strings.ReplaceAll(content, "&lt;", "<")
+	content = strings.ReplaceAll(content, "&gt;", ">")
+	content = strings.ReplaceAll(content, "&amp;", "&")
+	content = strings.ReplaceAll(content, "&quot;", "\"")
+	content = strings.ReplaceAll(content, "&apos;", "'")
+	return content
+}
+
 // ReplaceInFile replaces content in a file
 func ReplaceInFile(params map[string]interface{}) string {
 	path, ok := params["path"].(string)
@@ -155,6 +170,7 @@ func ReplaceInFile(params map[string]interface{}) string {
 	if !ok {
 		return "Error: Missing diff parameter"
 	}
+	diff = unescapeXML(diff)
 
 	// Read original file content
 	content, err := os.ReadFile(path)
@@ -165,20 +181,41 @@ func ReplaceInFile(params map[string]interface{}) string {
 	originalContent := string(content)
 	fileContent := originalContent
 
-	// Parse and apply SEARCH/REPLACE blocks
-	// Use regex to match SEARCH/REPLACE blocks
-	re := regexp.MustCompile(`<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE`)
+	// Parse and apply SEARCH/REPLACE blocks - more flexible regex to handle different line endings
+	// This regex makes newlines optional around the markers to be more flexible
+	re := regexp.MustCompile(`<{7}\s*SEARCH\s*\n?([\s\S]*?)\n?\s*={7}\s*\n?([\s\S]*?)\n?\s*>{7}\s*REPLACE`)
 	matches := re.FindAllStringSubmatch(diff, -1)
 
 	if len(matches) == 0 {
-		return "Error: No valid SEARCH/REPLACE blocks found"
+		// Fall back to the original regex if the flexible one doesn't match
+		reOriginal := regexp.MustCompile(`<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE`)
+		matches = reOriginal.FindAllStringSubmatch(diff, -1)
+
+		if len(matches) == 0 {
+			// Try one more regex that doesn't require newlines
+			reLastAttempt := regexp.MustCompile(`<<<<<<< SEARCH([\s\S]*?)=======([\s\S]*?)>>>>>>> REPLACE`)
+			matches = reLastAttempt.FindAllStringSubmatch(diff, -1)
+
+			if len(matches) == 0 {
+				return "Error: No valid SEARCH/REPLACE blocks found. Format should be:\n<<<<<<< SEARCH\ntext to search\n=======\ntext to replace with\n>>>>>>> REPLACE"
+			}
+		}
 	}
 
 	// Apply each SEARCH/REPLACE block
 	for _, match := range matches {
 		search := match[1]
 		replace := match[2]
-		fileContent = strings.Replace(fileContent, search, replace, 1)
+
+		// Trim any leading/trailing whitespace to make the matching more robust
+		search = strings.TrimSpace(search)
+
+		// Do the replacement
+		if strings.Contains(fileContent, search) {
+			fileContent = strings.Replace(fileContent, search, replace, 1)
+		} else {
+			return fmt.Sprintf("Error: Could not find text to replace: '%s'", search)
+		}
 	}
 
 	// Write back to file
@@ -517,7 +554,8 @@ func ListFiles(params map[string]interface{}) string {
 }
 
 // ListCodeDefinitionNames lists code definition names in a directory
-// TODO: use language parser to extract definitions
+// TODO: use language parser to extract definitions, for example:
+// - use go doc to extract definitions in Go
 func ListCodeDefinitionNames(params map[string]interface{}) string {
 	path, ok := params["path"].(string)
 	if !ok {
@@ -686,12 +724,12 @@ func FollowupQuestion(params map[string]interface{}) string {
 	return ""
 }
 
-// PlanModeResponse handles responses in plan mode
-func PlanModeResponse(params map[string]interface{}) string {
+// AskModeResponse handles responses in plan mode
+func AskModeResponse(params map[string]interface{}) string {
 	// Get the response content from the tool use parameters
 	response, ok := params["response"].(string)
 	if !ok || response == "" {
-		return "Error: No response provided for plan_mode_response tool"
+		return "Error: No response provided for ask_mode_response tool"
 	}
 
 	return response
@@ -847,4 +885,127 @@ func FindFiles(params map[string]interface{}) string {
 	}
 
 	return results.String()
+}
+
+// UseMcpTool calls a tool provided by a connected MCP server
+func UseMcpTool(params map[string]interface{}) string {
+	serverName, ok := params["server_name"].(string)
+	if !ok || serverName == "" {
+		return "Error: Missing or invalid server_name parameter"
+	}
+
+	toolName, ok := params["tool_name"].(string)
+	if !ok || toolName == "" {
+		return "Error: Missing or invalid tool_name parameter"
+	}
+
+	argsRaw, ok := params["arguments"].(string)
+	if !ok {
+		return "Error: Missing or invalid arguments parameter"
+	}
+
+	// Parse arguments JSON string to map
+	var arguments map[string]interface{}
+	if err := json.Unmarshal([]byte(argsRaw), &arguments); err != nil {
+		return fmt.Sprintf("Error parsing arguments JSON: %s", err)
+	}
+
+	mcpHub := hub.GetMcpHub()
+
+	// Check if MCP is enabled
+	if mcpHub.GetMode() == "off" {
+		return "Error: MCP is disabled. Enable it in settings to use MCP tools."
+	}
+
+	// Call the tool
+	response, err := mcpHub.CallTool(serverName, toolName, arguments)
+	if err != nil {
+		return fmt.Sprintf("Error calling MCP tool %s on server %s: %s", toolName, serverName, err)
+	}
+
+	// Format and return the response
+	if response.IsError {
+		return fmt.Sprintf("MCP tool error: %s", formatToolResponse(response))
+	}
+
+	return formatToolResponse(response)
+}
+
+// AccessMcpResource accesses a resource provided by a connected MCP server
+func AccessMcpResource(params map[string]interface{}) string {
+	serverName, ok := params["server_name"].(string)
+	if !ok || serverName == "" {
+		return "Error: Missing or invalid server_name parameter"
+	}
+
+	uri, ok := params["uri"].(string)
+	if !ok || uri == "" {
+		return "Error: Missing or invalid uri parameter"
+	}
+
+	mcpHub := hub.GetMcpHub()
+
+	// Check if MCP is enabled
+	if mcpHub.GetMode() == "off" {
+		return "Error: MCP is disabled. Enable it in settings to use MCP resources."
+	}
+
+	// Read the resource
+	response, err := mcpHub.ReadResource(serverName, uri)
+	if err != nil {
+		return fmt.Sprintf("Error accessing MCP resource %s on server %s: %s", uri, serverName, err)
+	}
+
+	// Format and return the response
+	return formatResourceResponse(response)
+}
+
+// formatToolResponse formats a tool response for output
+func formatToolResponse(response *common.McpToolCallResponse) string {
+	var result strings.Builder
+
+	for _, content := range response.Content {
+		switch content.Type {
+		case "text":
+			result.WriteString(content.Text)
+		case "data":
+			if content.MimeType != "" {
+				result.WriteString(fmt.Sprintf("[Data with MIME type: %s]\n", content.MimeType))
+			}
+			result.WriteString(content.Data)
+		case "resource":
+			result.WriteString(fmt.Sprintf("[Resource: %s]\n", content.Resource.URI))
+			if content.Resource.Text != "" {
+				result.WriteString(content.Resource.Text)
+			} else if content.Resource.Blob != "" {
+				result.WriteString(fmt.Sprintf("[Binary data with MIME type: %s]", content.Resource.MimeType))
+			}
+		default:
+			result.WriteString(fmt.Sprintf("[Unknown content type: %s]", content.Type))
+		}
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+// formatResourceResponse formats a resource response for output
+func formatResourceResponse(response *common.McpResourceResponse) string {
+	var result strings.Builder
+
+	for _, content := range response.Contents {
+		result.WriteString(fmt.Sprintf("[Resource: %s]\n", content.URI))
+		if content.MimeType != "" {
+			result.WriteString(fmt.Sprintf("MIME type: %s\n", content.MimeType))
+		}
+
+		if content.Text != "" {
+			result.WriteString(content.Text)
+		} else if content.Blob != "" {
+			result.WriteString("[Binary data]")
+		}
+		result.WriteString("\n")
+	}
+
+	return result.String()
 }
