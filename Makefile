@@ -73,10 +73,10 @@ test:
 .PHONY: lint
 lint:
 	$(GO) vet ./...
-	@if command -v golint > /dev/null; then \
-		golint ./...; \
+	@if command -v staticcheck > /dev/null; then \
+		staticcheck ./...; \
 	else \
-		echo "golint not installed, skipping linting"; \
+		echo "staticcheck not installed. Run: go install honnef.co/go/tools/cmd/staticcheck@latest"; \
 	fi
 
 # Clean build artifacts
