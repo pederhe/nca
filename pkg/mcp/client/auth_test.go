@@ -115,7 +115,7 @@ func TestMemoryTokenStorage(t *testing.T) {
 	assert.NoError(t, err, "LoadClientInfo should not error")
 	assert.Nil(t, clientInfo, "Client info should be nil initially")
 
-	codeVerifier, err := storage.LoadCodeVerifier()
+	codeVerifier, _ := storage.LoadCodeVerifier()
 	assert.Equal(t, "", codeVerifier, "Code verifier should be empty initially")
 
 	// Test saving and loading tokens

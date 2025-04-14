@@ -163,7 +163,7 @@ func (p *QwenProvider) ChatStream(ctx context.Context, messages []types.Message,
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Qwen API error: %s", string(body))
+		return nil, fmt.Errorf("qwen API error: %s", string(body))
 	}
 
 	reader := bufio.NewReader(resp.Body)

@@ -204,7 +204,7 @@ func CreateMockServerInitializeResponse(id interface{}) common.JSONRPCMessage {
 
 // CreateMockResponseFromRequest creates a success response based on a request message
 func CreateMockResponseFromRequest(request common.JSONRPCMessage, result interface{}) common.JSONRPCMessage {
-	id, _ := request["id"]
+	id := request["id"]
 
 	return common.JSONRPCMessage{
 		"jsonrpc": "2.0",
@@ -215,7 +215,7 @@ func CreateMockResponseFromRequest(request common.JSONRPCMessage, result interfa
 
 // CreateMockErrorResponseFromRequest creates an error response based on a request message
 func CreateMockErrorResponseFromRequest(request common.JSONRPCMessage, code int, message string) common.JSONRPCMessage {
-	id, _ := request["id"]
+	id := request["id"]
 
 	return common.JSONRPCMessage{
 		"jsonrpc": "2.0",

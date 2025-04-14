@@ -184,7 +184,7 @@ func (p *DefaultOAuthClientProvider) RedirectToAuthorization(authURL *url.URL) e
 		return p.redirectCallback(authURL)
 	}
 
-	return errors.New("No redirect callback provided")
+	return errors.New("no redirect callback provided")
 }
 
 // SaveCodeVerifier implements the OAuthClientProvider interface
@@ -213,7 +213,7 @@ func (p *DefaultOAuthClientProvider) CodeVerifier() (string, error) {
 		return codeVerifier, nil
 	}
 
-	return "", errors.New("Code verifier not found")
+	return "", errors.New("code verifier not found")
 }
 
 // Auth coordinates the complete authentication process with the server
@@ -229,7 +229,7 @@ func Auth(
 	}
 
 	if metadata == nil {
-		return "", errors.New("Server does not support OAuth authentication")
+		return "", errors.New("server does not support OAuth authentication")
 	}
 
 	// Check client registration
@@ -240,13 +240,13 @@ func Auth(
 
 	if clientInfo == nil {
 		if authorizationCode != "" {
-			return "", errors.New("Existing OAuth client information required for authorization code exchange")
+			return "", errors.New("existing OAuth client information required for authorization code exchange")
 		}
 
 		// Dynamic registration of client
 		clientMetadata := provider.ClientMetadata()
 		if clientMetadata == nil {
-			return "", errors.New("Client metadata not provided")
+			return "", errors.New("client metadata not provided")
 		}
 
 		fullInfo, err := RegisterClient(serverURL, metadata, clientMetadata)
@@ -255,7 +255,7 @@ func Auth(
 		}
 
 		if err := provider.SaveClientInformation(fullInfo); err != nil {
-			return "", fmt.Errorf("Failed to save client information: %w", err)
+			return "", fmt.Errorf("failed to save client information: %w", err)
 		}
 
 		clientInfo = &common.OAuthClientInformation{
@@ -270,7 +270,7 @@ func Auth(
 	if authorizationCode != "" {
 		codeVerifier, err := provider.CodeVerifier()
 		if err != nil {
-			return "", fmt.Errorf("Failed to get code verifier: %w", err)
+			return "", fmt.Errorf("failed to get code verifier: %w", err)
 		}
 
 		tokens, err := ExchangeAuthorization(
@@ -282,11 +282,11 @@ func Auth(
 			provider.RedirectURL(),
 		)
 		if err != nil {
-			return "", fmt.Errorf("Failed to exchange authorization code: %w", err)
+			return "", fmt.Errorf("failed to exchange authorization code: %w", err)
 		}
 
 		if err := provider.SaveTokens(tokens); err != nil {
-			return "", fmt.Errorf("Failed to save tokens: %w", err)
+			return "", fmt.Errorf("failed to save tokens: %w", err)
 		}
 
 		return Authorized, nil
@@ -295,7 +295,7 @@ func Auth(
 	// Check existing tokens
 	tokens, err := provider.Tokens()
 	if err != nil {
-		return "", fmt.Errorf("Failed to get tokens: %w", err)
+		return "", fmt.Errorf("failed to get tokens: %w", err)
 	}
 
 	if tokens != nil && tokens.RefreshToken != "" {
@@ -308,7 +308,7 @@ func Auth(
 		)
 		if err == nil {
 			if err := provider.SaveTokens(newTokens); err != nil {
-				return "", fmt.Errorf("Failed to save refreshed tokens: %w", err)
+				return "", fmt.Errorf("failed to save refreshed tokens: %w", err)
 			}
 			return Authorized, nil
 		}
@@ -324,15 +324,15 @@ func Auth(
 		provider.RedirectURL(),
 	)
 	if err != nil {
-		return "", fmt.Errorf("Failed to start authorization: %w", err)
+		return "", fmt.Errorf("failed to start authorization: %w", err)
 	}
 
 	if err := provider.SaveCodeVerifier(codeVerifier); err != nil {
-		return "", fmt.Errorf("Failed to save code verifier: %w", err)
+		return "", fmt.Errorf("failed to save code verifier: %w", err)
 	}
 
 	if err := provider.RedirectToAuthorization(authURL); err != nil {
-		return "", fmt.Errorf("Failed to redirect to authorization URL: %w", err)
+		return "", fmt.Errorf("failed to redirect to authorization URL: %w", err)
 	}
 
 	return Redirect, nil
@@ -368,7 +368,7 @@ func DiscoverOAuthMetadata(serverURL string) (*common.OAuthMetadata, error) {
 
 	metadata, err := common.ParseOAuthMetadata(data)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to parse OAuth metadata: %w", err)
+		return nil, fmt.Errorf("failed to parse OAuth metadata: %w", err)
 	}
 
 	return metadata, nil
@@ -389,7 +389,7 @@ func StartAuthorization(
 		}
 
 		if metadata == nil {
-			return nil, "", errors.New("Server does not support OAuth authentication")
+			return nil, "", errors.New("server does not support OAuth authentication")
 		}
 	}
 
@@ -433,7 +433,7 @@ func ExchangeAuthorization(
 		}
 
 		if metadata == nil {
-			return nil, errors.New("Server does not support OAuth authentication")
+			return nil, errors.New("server does not support OAuth authentication")
 		}
 	}
 
@@ -468,7 +468,7 @@ func ExchangeAuthorization(
 
 	tokens, err := common.ParseOAuthTokens(respData)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to parse OAuth tokens: %w", err)
+		return nil, fmt.Errorf("failed to parse OAuth tokens: %w", err)
 	}
 
 	return tokens, nil
@@ -489,7 +489,7 @@ func RefreshAuthorization(
 		}
 
 		if metadata == nil {
-			return nil, errors.New("Server does not support OAuth authentication")
+			return nil, errors.New("server does not support OAuth authentication")
 		}
 	}
 
@@ -522,7 +522,7 @@ func RefreshAuthorization(
 
 	tokens, err := common.ParseOAuthTokens(respData)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to parse OAuth tokens: %w", err)
+		return nil, fmt.Errorf("failed to parse OAuth tokens: %w", err)
 	}
 
 	return tokens, nil
@@ -542,17 +542,17 @@ func RegisterClient(
 		}
 
 		if metadata == nil {
-			return nil, errors.New("Server does not support OAuth authentication")
+			return nil, errors.New("server does not support OAuth authentication")
 		}
 	}
 
 	if metadata.RegistrationEndpoint == "" {
-		return nil, errors.New("Server does not support dynamic client registration")
+		return nil, errors.New("server does not support dynamic client registration")
 	}
 
 	// Validate client metadata
 	if err := clientMetadata.Validate(); err != nil {
-		return nil, fmt.Errorf("Client metadata validation failed: %w", err)
+		return nil, fmt.Errorf("client metadata validation failed: %w", err)
 	}
 
 	// Prepare request data
@@ -579,7 +579,7 @@ func RegisterClient(
 
 	clientInfo, err := common.ParseOAuthClientInformationFull(respData)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to parse client information: %w", err)
+		return nil, fmt.Errorf("failed to parse client information: %w", err)
 	}
 
 	return clientInfo, nil
@@ -628,7 +628,7 @@ func (s *MemoryTokenStorage) SaveCodeVerifier(codeVerifier string) error {
 // LoadCodeVerifier implements the TokenStorage interface
 func (s *MemoryTokenStorage) LoadCodeVerifier() (string, error) {
 	if s.codeVerifier == "" {
-		return "", errors.New("Token not found")
+		return "", errors.New("token not found")
 	}
 	return s.codeVerifier, nil
 }
@@ -655,7 +655,7 @@ func (p *StandardOAuthProvider) GetToken() (string, error) {
 	}
 
 	if tokens == nil {
-		return "", errors.New("Token not found")
+		return "", errors.New("token not found")
 	}
 
 	return tokens.AccessToken, nil
@@ -669,7 +669,7 @@ func (p *StandardOAuthProvider) RefreshToken() (string, error) {
 	}
 
 	if tokens == nil || tokens.RefreshToken == "" {
-		return "", errors.New("Refresh token not found")
+		return "", errors.New("refresh token not found")
 	}
 
 	clientInfo, err := p.clientProvider.ClientInformation()
@@ -678,7 +678,7 @@ func (p *StandardOAuthProvider) RefreshToken() (string, error) {
 	}
 
 	if clientInfo == nil {
-		return "", errors.New("Client information not found")
+		return "", errors.New("client information not found")
 	}
 
 	metadata, err := DiscoverOAuthMetadata(p.serverURL)
@@ -687,7 +687,7 @@ func (p *StandardOAuthProvider) RefreshToken() (string, error) {
 	}
 
 	if metadata == nil {
-		return "", errors.New("Server does not support OAuth authentication")
+		return "", errors.New("server does not support OAuth authentication")
 	}
 
 	newTokens, err := RefreshAuthorization(

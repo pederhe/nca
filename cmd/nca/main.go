@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,6 +17,7 @@ import (
 	"github.com/pederhe/nca/pkg/api"
 	"github.com/pederhe/nca/pkg/api/types"
 	"github.com/pederhe/nca/pkg/config"
+	"github.com/pederhe/nca/pkg/log"
 	"github.com/pederhe/nca/pkg/utils"
 )
 
@@ -26,14 +26,6 @@ var (
 	Version    = "dev"
 	BuildTime  = "unknown"
 	CommitHash = "unknown"
-)
-
-// Debug mode variables
-var (
-	debugMode    bool
-	debugLogFile *os.File
-	sessionID    string
-	debugLogPath string
 )
 
 // Add a global variable to cancel API requests
@@ -92,10 +84,9 @@ func main() {
 
 	// Initialize debug mode if enabled
 	if *debugFlag {
-		debugMode = true
-		initDebugMode()
-		defer closeDebugLog()
-		logDebug("Program started with debug mode enabled\n")
+		log.EnableDebugMode()
+		defer log.CloseDebugLog()
+		log.LogDebug("Program started with debug mode enabled\n")
 	}
 
 	args := flag.Args()
@@ -105,17 +96,17 @@ func main() {
 		switch args[0] {
 		case "config":
 			// Handle configuration settings command
-			logDebug(fmt.Sprintf("Config command: %v\n", args))
+			log.LogDebug(fmt.Sprintf("Config command: %v\n", args))
 			handleConfigCommand(args[1:])
 			return
 		case "commit":
 			// Handle git commit operation command
-			logDebug("Commit command detected\n")
+			log.LogDebug("Commit command detected\n")
 			runREPL("commit all current changes, and summarize the changes")
 			return
 		case "help":
 			// Display help information
-			logDebug("Help command detected\n")
+			log.LogDebug("Help command detected\n")
 			displayHelp()
 			return
 		}
@@ -133,17 +124,17 @@ func main() {
 
 	// Handle pipe input
 	if hasPipe {
-		logDebug("Detected pipe input\n")
+		log.LogDebug("Detected pipe input\n")
 		// Read from pipe
 		reader := bufio.NewReader(os.Stdin)
 		content, err := io.ReadAll(reader)
 		if err != nil {
 			fmt.Println("Error reading from pipe:", err)
-			logDebug(fmt.Sprintf("Error reading from pipe: %s\n", err))
+			log.LogDebug(fmt.Sprintf("Error reading from pipe: %s\n", err))
 			return
 		}
 
-		logDebug(fmt.Sprintf("Pipe input content length: %d bytes\n", len(content)))
+		log.LogDebug(fmt.Sprintf("Pipe input content length: %d bytes\n", len(content)))
 
 		// Combine pipe content with initial prompt if any
 		if initialPrompt == "" {
@@ -155,10 +146,10 @@ func main() {
 		// When pipe input is detected, automatically run in one-time query mode
 		if initialPrompt == "" {
 			fmt.Println("Error: Empty pipe input")
-			logDebug("Error: Empty pipe input\n")
+			log.LogDebug("Error: Empty pipe input\n")
 			return
 		}
-		logDebug(fmt.Sprintf("Running one-time query mode with pipe input: %s\n", initialPrompt))
+		log.LogDebug(fmt.Sprintf("Running one-time query mode with pipe input: %s\n", initialPrompt))
 		runOneOffQuery(initialPrompt)
 		return
 	}
@@ -167,15 +158,15 @@ func main() {
 	if *promptFlag {
 		if initialPrompt == "" {
 			fmt.Println("Error: No prompt provided for one-time query")
-			logDebug("Error: No prompt provided for one-time query\n")
+			log.LogDebug("Error: No prompt provided for one-time query\n")
 			return
 		}
-		logDebug(fmt.Sprintf("One-time query mode with prompt: %s\n", initialPrompt))
+		log.LogDebug(fmt.Sprintf("One-time query mode with prompt: %s\n", initialPrompt))
 		runOneOffQuery(initialPrompt)
 	} else {
-		logDebug("Starting interactive REPL mode\n")
+		log.LogDebug("Starting interactive REPL mode\n")
 		if initialPrompt != "" {
-			logDebug(fmt.Sprintf("With initial prompt: %s\n", initialPrompt))
+			log.LogDebug(fmt.Sprintf("With initial prompt: %s\n", initialPrompt))
 		}
 		runREPL(initialPrompt)
 	}
@@ -274,9 +265,9 @@ func runREPL(initialPrompt string) {
 	var currentDeletedRange [2]int
 
 	// Log REPL start in debug mode
-	logDebug("Starting REPL session\n")
+	log.LogDebug("Starting REPL session\n")
 	if initialPrompt != "" {
-		logDebug(fmt.Sprintf("Initial prompt: %s\n", initialPrompt))
+		log.LogDebug(fmt.Sprintf("Initial prompt: %s\n", initialPrompt))
 	}
 
 	// If there's an initial prompt, handle it first
@@ -285,8 +276,8 @@ func runREPL(initialPrompt string) {
 	} else {
 		fmt.Printf("NCA %s (%s,%s)\n", Version, BuildTime, CommitHash)
 		fmt.Println("Press Ctrl+A to toggle between [Agent] and [Ask] mode")
-		if debugMode {
-			fmt.Print(utils.ColoredText("Debug mode enabled. Logs saved to: "+debugLogPath+"\n", utils.ColorYellow))
+		if log.IsDebugMode() {
+			fmt.Print(utils.ColoredText("Debug mode enabled. Logs saved to: "+log.GetDebugLogPath()+"\n", utils.ColorYellow))
 		}
 	}
 
@@ -316,7 +307,7 @@ func runREPL(initialPrompt string) {
 	interruptHandler := func() {
 		if isProcessingAPIRequest && currentRequestCancel != nil {
 			// If an API request is in progress, cancel it
-			logDebug("Cancelling current API request due to interrupt\n")
+			log.LogDebug("Cancelling current API request due to interrupt\n")
 			currentRequestCancel()
 			fmt.Println("\nAPI request cancelled")
 		}
@@ -341,7 +332,7 @@ func runREPL(initialPrompt string) {
 	})
 	if err != nil {
 		fmt.Println("Error initializing readline:", err)
-		logDebug(fmt.Sprintf("Error initializing readline: %s\n", err))
+		log.LogDebug(fmt.Sprintf("Error initializing readline: %s\n", err))
 		return
 	}
 	defer rl.Close()
@@ -357,7 +348,7 @@ func runREPL(initialPrompt string) {
 				newPrompt := getPromptPrefix()
 				rl.SetPrompt(utils.ColoredText(newPrompt, utils.ColorPurple))
 				rl.Refresh()
-				logDebug(fmt.Sprintf("Mode switched to: %s\n", newPrompt))
+				log.LogDebug(fmt.Sprintf("Mode switched to: %s\n", newPrompt))
 			}
 			return r, true // rl.Close will block the program if we return false here
 		}
@@ -390,15 +381,15 @@ func runREPL(initialPrompt string) {
 			// Handle Ctrl+C or Ctrl+D
 			if err == readline.ErrInterrupt {
 				fmt.Println("Interrupted")
-				logDebug("User interrupted input with Ctrl+C\n")
+				log.LogDebug("User interrupted input with Ctrl+C\n")
 				continue
 			} else if err == io.EOF {
-				logDebug("User exited with Ctrl+D\n")
+				log.LogDebug("User exited with Ctrl+D\n")
 				handleExit("with Ctrl+D")
 				break
 			}
 			fmt.Println("Error reading input:", err)
-			logDebug(fmt.Sprintf("Error reading input: %s\n", err))
+			log.LogDebug(fmt.Sprintf("Error reading input: %s\n", err))
 			continue
 		}
 
@@ -488,12 +479,12 @@ func runREPL(initialPrompt string) {
 
 func handleExit(exitReason string) {
 	fmt.Println("Exiting")
-	logDebug(fmt.Sprintf("User exited: %s\n", exitReason))
+	log.LogDebug(fmt.Sprintf("User exited: %s\n", exitReason))
 
 	// Save checkpoints before exit
 	if err := checkpointManager.SaveCheckpoints(); err != nil {
 		fmt.Printf("Warning: Failed to save checkpoints: %s\n", err)
-		logDebug(fmt.Sprintf("Failed to save checkpoints: %s\n", err))
+		log.LogDebug(fmt.Sprintf("Failed to save checkpoints: %s\n", err))
 	}
 }
 
@@ -501,7 +492,7 @@ func handleExit(exitReason string) {
 func handleInput(input string, conversation *[]map[string]string, currentDeletedRange *[2]int) bool {
 	// If it's a command
 	if strings.HasPrefix(input, "/") {
-		logDebug(fmt.Sprintf("Slash command: %s\n", input))
+		log.LogDebug(fmt.Sprintf("Slash command: %s\n", input))
 		if input == "/exit" {
 			handleExit("with /exit command")
 			return true // Indicates need to exit
@@ -518,8 +509,8 @@ func handleInput(input string, conversation *[]map[string]string, currentDeleted
 func runOneOffQuery(prompt string) {
 	conversation := []map[string]string{}
 	var currentDeletedRange [2]int
-	logDebug("Running one-off query mode\n")
-	logDebug(fmt.Sprintf("Query: %s\n", prompt))
+	log.LogDebug("Running one-off query mode\n")
+	log.LogDebug(fmt.Sprintf("Query: %s\n", prompt))
 
 	// Set up signal handling
 	signalChan := make(chan os.Signal, 1)
@@ -529,7 +520,7 @@ func runOneOffQuery(prompt string) {
 	interruptHandler := func() {
 		if isProcessingAPIRequest && currentRequestCancel != nil {
 			// If an API request is in progress, cancel it
-			logDebug("Cancelling current API request due to interrupt\n")
+			log.LogDebug("Cancelling current API request due to interrupt\n")
 			currentRequestCancel()
 			fmt.Println("\nAPI request cancelled")
 		}
@@ -548,7 +539,7 @@ func runOneOffQuery(prompt string) {
 	signal.Stop(signalChan)
 	close(signalChan)
 
-	logDebug("One-off query completed\n")
+	log.LogDebug("One-off query completed\n")
 }
 
 // Handle user input prompt
@@ -560,7 +551,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string, currentDelet
 	// This helps users understand that their files or URLs are being processed
 	if utils.HasBackticks(prompt) {
 		fmt.Print("\nProcessing resources in prompt... ")
-		logDebug("Detected backticks in prompt, processing resources\n")
+		log.LogDebug("Detected backticks in prompt, processing resources\n")
 
 		newPrompt, err := utils.ProcessPrompt(prompt)
 		if err != nil {
@@ -579,7 +570,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string, currentDelet
 	})
 
 	// Log user input in debug mode
-	logDebug(fmt.Sprintf("USER INPUT (Mode: %s): %s\n",
+	log.LogDebug(fmt.Sprintf("USER INPUT (Mode: %s): %s\n",
 		map[bool]string{true: "Agent", false: "Ask"}[isAgentMode], prompt))
 
 	// Count of consecutive responses without tool use
@@ -594,7 +585,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string, currentDelet
 		if maxMessagesPerTask <= 0 {
 			limitMessage := "Maximum of 25 requests per task reached, system has automatically exited"
 			fmt.Println(utils.ColoredText(limitMessage, utils.ColorYellow))
-			logDebug(fmt.Sprintf("MESSAGE LIMIT REACHED: %s\n", limitMessage))
+			log.LogDebug(fmt.Sprintf("MESSAGE LIMIT REACHED: %s\n", limitMessage))
 			break
 		}
 
@@ -608,7 +599,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string, currentDelet
 		response, err := callAPI(client, *conversation)
 		if err != nil {
 			fmt.Println("Error calling API:", err)
-			logDebug(fmt.Sprintf("API ERROR: %s\n", err))
+			log.LogDebug(fmt.Sprintf("API ERROR: %s\n", err))
 
 			// Add error message to conversation history
 			*conversation = append(*conversation, map[string]string{
@@ -638,7 +629,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string, currentDelet
 			*conversation = append((*conversation)[:newRange[0]], (*conversation)[newRange[1]+1:]...)
 
 			// Log truncation in debug mode
-			logDebug(fmt.Sprintf("Context truncated. Removed messages %d-%d\n", newRange[0], newRange[1]))
+			log.LogDebug(fmt.Sprintf("Context truncated. Removed messages %d-%d\n", newRange[0], newRange[1]))
 
 			// Continue with truncated conversation
 			continue
@@ -660,7 +651,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string, currentDelet
 
 			// Log tool use in debug mode
 			toolName, _ := toolUse["tool"].(string)
-			logDebug(fmt.Sprintf("TOOL USE: %v\n", toolUse))
+			log.LogDebug(fmt.Sprintf("TOOL USE: %v\n", toolUse))
 
 			result := handleToolUse(toolUse)
 			if toolName == "replace_in_file" {
@@ -672,7 +663,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string, currentDelet
 			}
 
 			// Log tool result in debug mode
-			logDebug(fmt.Sprintf("TOOL RESULT: %s\n", result))
+			log.LogDebug(fmt.Sprintf("TOOL RESULT: %s\n", result))
 
 			// Get tool name (already extracted above)
 			// Check if it's the task completion tool
@@ -702,14 +693,14 @@ func handlePrompt(prompt string, conversation *[]map[string]string, currentDelet
 
 			// Continue loop, process next step
 		} else {
-			logDebug(fmt.Sprintf("ERROR: No tool use response, content: %s\n", response.Content))
+			log.LogDebug(fmt.Sprintf("ERROR: No tool use response, content: %s\n", response.Content))
 			// Increment counter for responses without tool use
 			noToolUseCount++
 
 			// Check if exceeded 3 attempts without tool use
 			if noToolUseCount >= 3 {
 				errorMessage := "[FATAL ERROR] You failed to use a tool after 3 attempts. Exiting task."
-				logDebug(fmt.Sprintf("ERROR: %s\n", errorMessage))
+				log.LogDebug(fmt.Sprintf("ERROR: %s\n", errorMessage))
 				*conversation = append(*conversation, map[string]string{
 					"role":    "user",
 					"content": errorMessage,
@@ -720,7 +711,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string, currentDelet
 
 			// No tool use request, add error message to conversation history
 			errorMessage := fmt.Sprintf("[ERROR] You did not use a tool in your previous response! Please retry with a tool use. (Attempt %d/3)", noToolUseCount)
-			logDebug(fmt.Sprintf("ERROR: %s\n", errorMessage))
+			log.LogDebug(fmt.Sprintf("ERROR: %s\n", errorMessage))
 			*conversation = append(*conversation, map[string]string{
 				"role":    "user",
 				"content": errorMessage,
@@ -805,7 +796,7 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string, currentDe
 		}
 		result := checkpointManager.HandleCheckpointCommand(cmdArgs)
 		fmt.Println(result)
-		logDebug(fmt.Sprintf("Checkpoint command executed: %s\nResult: %s\n", cmd, result))
+		log.LogDebug(fmt.Sprintf("Checkpoint command executed: %s\nResult: %s\n", cmd, result))
 		return
 	}
 
@@ -819,7 +810,7 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string, currentDe
 			// If there's only "/config" without other arguments, show usage
 			fmt.Println("Usage: /config [set|unset|list] [--global] [key] [value]")
 		}
-		logDebug(fmt.Sprintf("Config command executed in interactive mode: %s\n", cmd))
+		log.LogDebug(fmt.Sprintf("Config command executed in interactive mode: %s\n", cmd))
 		return
 	}
 
@@ -837,7 +828,7 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string, currentDe
 				fmt.Println(utils.ColoredText("MCP servers reloaded", utils.ColorGreen))
 				// Show updated server connections
 				mcp.GetMcpHub().PrintConnections()
-				logDebug("MCP reload command executed\n")
+				log.LogDebug("MCP reload command executed\n")
 			default:
 				fmt.Println("Unknown MCP command. Available commands: list, reload")
 			}
@@ -855,7 +846,7 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string, currentDe
 		conversationTruncatedCount = 0
 		fmt.Println("Conversation history cleared")
 		fmt.Println(utils.ColoredText("----------------New Chat----------------", utils.ColorBlue))
-		logDebug("Conversation history cleared by user\n")
+		log.LogDebug("Conversation history cleared by user\n")
 	case "/help":
 		fmt.Println("\nINTERACTIVE COMMANDS:")
 		fmt.Println("  /clear      - Clear conversation history")
@@ -867,13 +858,13 @@ func handleSlashCommand(cmd string, conversation *[]map[string]string, currentDe
 		fmt.Println("               Usage: /mcp [list|reload]")
 		fmt.Println("  /exit       - Exit the program")
 		fmt.Println("  /help       - Show help information")
-		logDebug("Help information displayed\n")
+		log.LogDebug("Help information displayed\n")
 	case "/exit":
 		// These are handled in the runREPL function
 		// Nothing to do here
 	default:
 		fmt.Println("Unknown command. Enter /help for help")
-		logDebug(fmt.Sprintf("Unknown command attempted: %s\n", cmd))
+		log.LogDebug(fmt.Sprintf("Unknown command attempted: %s\n", cmd))
 	}
 }
 
@@ -907,7 +898,7 @@ func callAPI(client *api.Client, conversation []map[string]string) (APIResponse,
 	// Build system prompt
 	systemPrompt, err := core.BuildSystemPrompt()
 	if err != nil {
-		logDebug(fmt.Sprintf("ERROR building system prompt: %s\n", err))
+		log.LogDebug(fmt.Sprintf("ERROR building system prompt: %s\n", err))
 		return APIResponse{}, fmt.Errorf("error building system prompt: %s", err)
 	}
 
@@ -928,14 +919,14 @@ func callAPI(client *api.Client, conversation []map[string]string) (APIResponse,
 	}
 
 	// Log API request in debug mode
-	logDebug("API REQUEST PAYLOAD:\n")
+	log.LogDebug("API REQUEST PAYLOAD:\n")
 	for i, msg := range messages {
 		// Truncate system message for brevity in logs
 		content := msg.Content
 		if msg.Role == "system" && len(content) > 100 {
 			content = content[:100] + "... [truncated]"
 		}
-		logDebug(fmt.Sprintf("  [%d] %s: %s\n", i, msg.Role, content))
+		log.LogDebug(fmt.Sprintf("  [%d] %s: %s\n", i, msg.Role, content))
 	}
 
 	// Start dynamic loading animation
@@ -1032,7 +1023,7 @@ func callAPI(client *api.Client, conversation []map[string]string) (APIResponse,
 	select {
 	case <-ctx.Done():
 		// Context was cancelled (user pressed Ctrl+C)
-		logDebug("API request cancelled by user\n")
+		log.LogDebug("API request cancelled by user\n")
 		apiErr = fmt.Errorf("request cancelled by user")
 	case result := <-resultCh:
 		// API call completed
@@ -1047,10 +1038,10 @@ func callAPI(client *api.Client, conversation []map[string]string) (APIResponse,
 
 	// Log raw response in debug mode
 	if apiErr == nil {
-		logDebug(fmt.Sprintf("RAW API RESPONSE STREAM:\n%s\n%s\n%s\n",
+		log.LogDebug(fmt.Sprintf("RAW API RESPONSE STREAM:\n%s\n%s\n%s\n",
 			reasoningContent, "--------------------------------", content))
 	} else {
-		logDebug(fmt.Sprintf("API REQUEST CANCELLED OR ERROR: %s\n", apiErr))
+		log.LogDebug(fmt.Sprintf("API REQUEST CANCELLED OR ERROR: %s\n", apiErr))
 	}
 
 	// Ensure loading animation is stopped
@@ -1060,7 +1051,7 @@ func callAPI(client *api.Client, conversation []map[string]string) (APIResponse,
 	}
 
 	if apiErr != nil {
-		logDebug(fmt.Sprintf("API STREAM ERROR: %s\n", apiErr))
+		log.LogDebug(fmt.Sprintf("API STREAM ERROR: %s\n", apiErr))
 		return APIResponse{}, fmt.Errorf("API call error: %s", apiErr)
 	}
 
@@ -1251,65 +1242,15 @@ func handleToolUse(toolUse map[string]interface{}) string {
 	return result
 }
 
-// Initialize debug mode, creating necessary directories and log file
-func initDebugMode() {
-	// Create base debug directory if it doesn't exist
-	debugBaseDir := filepath.Join(os.Getenv("HOME"), ".nca", "debug")
-	if err := os.MkdirAll(debugBaseDir, 0755); err != nil {
-		fmt.Printf("Warning: Failed to create debug directory: %s\n", err)
-		debugMode = false
+func debugPrintUsage(usage *types.Usage) {
+	if !log.IsDebugMode() {
 		return
 	}
+	usageStr := fmt.Sprintf("\nPrompt tokens: %d, Completion tokens: %d, Total tokens: %d\n",
+		usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+	fmt.Print(usageStr)
 
-	// Create directory for today's date
-	now := time.Now()
-	dateDir := filepath.Join(debugBaseDir, now.Format("2006-01-02"))
-	if err := os.MkdirAll(dateDir, 0755); err != nil {
-		fmt.Printf("Warning: Failed to create date directory: %s\n", err)
-		debugMode = false
-		return
-	}
-
-	// Generate unique session ID based on timestamp
-	sessionID = now.Format("150405-") + fmt.Sprintf("%03d", now.Nanosecond()/1000000)
-
-	// Create log file
-	debugLogPath = filepath.Join(dateDir, fmt.Sprintf("session_%s.log", sessionID))
-	var err error
-	debugLogFile, err = os.Create(debugLogPath)
-	if err != nil {
-		fmt.Printf("Warning: Failed to create debug log file: %s\n", err)
-		debugMode = false
-		return
-	}
-
-	// Log session start
-	logDebug(fmt.Sprintf("Session started at %s\n", now.Format(time.RFC3339)))
-	logDebug(fmt.Sprintf("NCA version: %s, Build time: %s, Commit hash: %s\n",
-		Version, BuildTime, CommitHash))
-}
-
-// Write a message to the debug log
-func logDebug(message string) {
-	if !debugMode || debugLogFile == nil {
-		return
-	}
-
-	timestamp := time.Now().Format("15:04:05.000")
-	logEntry := fmt.Sprintf("[%s] %s", timestamp, message)
-
-	if _, err := debugLogFile.WriteString(logEntry); err != nil {
-		fmt.Printf("Warning: Failed to write to debug log: %s\n", err)
-	}
-}
-
-// Close the debug log file
-func closeDebugLog() {
-	if debugLogFile != nil {
-		logDebug("Session ended\n")
-		debugLogFile.Close()
-		debugLogFile = nil
-	}
+	log.LogDebug(usageStr)
 }
 
 // displayHelp shows all available commands and options
@@ -1348,15 +1289,4 @@ func displayHelp() {
 	fmt.Println("               Usage: /mcp [list|reload]")
 	fmt.Println("  /exit       - Exit the program")
 	fmt.Println("  /help       - Show help information")
-}
-
-func debugPrintUsage(usage *types.Usage) {
-	if !debugMode || debugLogFile == nil {
-		return
-	}
-	usageStr := fmt.Sprintf("\nPrompt tokens: %d, Completion tokens: %d, Total tokens: %d\n",
-		usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
-	fmt.Print(usageStr)
-
-	logDebug(usageStr)
 }
