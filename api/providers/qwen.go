@@ -266,6 +266,9 @@ func (p *QwenProvider) ChatStream(ctx context.Context, messages []types.Message,
 
 		if isDone {
 			finishReason = streamResp.Choices[0].FinishReason
+			if streamResp.Usage != nil {
+				finalUsage = streamResp.Usage
+			}
 		}
 
 		callback(reasoningContent, content, isDone)

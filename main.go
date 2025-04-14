@@ -189,7 +189,22 @@ func getEnvironmentDetails() string {
 		details += "ASK MODE\n"
 	}
 
+	// Get system language preference
+	lang := os.Getenv("LANG")
+	if lang == "" {
+		lang = "en_US.UTF-8" // Default to English if not set
+	}
+	lang = getLanguageCode(lang)
+	details += fmt.Sprintf("\n# Preferred Language\nSpeak in %s\n", lang)
+
 	return fmt.Sprintf("\n\n<environment_details>\n%s\n</environment_details>", details)
+}
+
+func getLanguageCode(lang string) string {
+	if strings.Contains(lang, "zh") {
+		return "中文"
+	}
+	return "English"
 }
 
 // Handle config command
@@ -603,6 +618,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string, currentDelet
 
 			break
 		}
+		debugPrintUsage(response.Usage)
 		maxMessagesPerTask--
 
 		// if the finish_reason is "length", it means the context length is insufficient, so we need to cut off the previous conversation
@@ -674,7 +690,7 @@ func handlePrompt(prompt string, conversation *[]map[string]string, currentDelet
 			toolDesc := formatToolDescription(toolUse)
 
 			// Add tool result to conversation history with description
-			// The last tool result of a task is not recorded, as models like DeepSeek-R1 don't support consecutive user messages
+			// some models return multiple tools, so we need to tell them to only use one tool per message
 			toolResultContent := fmt.Sprintf("%s Result:\n%s", toolDesc, result)
 			if _, exists := toolUse["has_multiple_tools"]; exists {
 				toolResultContent += "\n\nOnly one tool may be used per message. You must assess the first tool's result before proceeding to use the next tool."
@@ -1332,4 +1348,15 @@ func displayHelp() {
 	fmt.Println("               Usage: /mcp [list|reload]")
 	fmt.Println("  /exit       - Exit the program")
 	fmt.Println("  /help       - Show help information")
+}
+
+func debugPrintUsage(usage *types.Usage) {
+	if !debugMode || debugLogFile == nil {
+		return
+	}
+	usageStr := fmt.Sprintf("\nUsage: Prompt tokens: %d, Completion tokens: %d, Total tokens: %d\n",
+		usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+	fmt.Print(usageStr)
+
+	logDebug(usageStr)
 }

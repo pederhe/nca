@@ -363,6 +363,8 @@ func toolTagPrefix(tool string, tag string) string {
 		}
 	case "attempt_completion":
 		return ""
+	case "ask_followup_question":
+		return ""
 	}
 	return tag + ": "
 }

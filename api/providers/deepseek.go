@@ -210,6 +210,11 @@ func (p *DeepSeekProvider) ChatStream(ctx context.Context, messages []types.Mess
 					FinishReason:     finishReason,
 				}, ctx.Err()
 			}
+			// If the error is due to context length, set the finish reason to "length"
+			if strings.Contains(err.Error(), "context length") {
+				finishReason = "length"
+				err = nil
+			}
 			return &types.ChatStreamResponse{
 				ReasoningContent: fullReasoningContent.String(),
 				Content:          fullContent.String(),
@@ -261,6 +266,9 @@ func (p *DeepSeekProvider) ChatStream(ctx context.Context, messages []types.Mess
 
 		if isDone {
 			finishReason = streamResp.Choices[0].FinishReason
+			if streamResp.Usage != nil {
+				finalUsage = streamResp.Usage
+			}
 		}
 
 		callback(reasoningContent, content, isDone)
