@@ -8,7 +8,7 @@ GO := go
 OUTPUT_DIR := bin
 
 # Main source file
-MAIN_FILE := main.go
+MAIN_FILE := cmd/nca/main.go
 
 # Target platforms
 PLATFORMS := linux darwin windows
@@ -31,7 +31,7 @@ all: build
 # Initialize module
 .PHONY: init
 init:
-	$(GO) mod init github.com/yourusername/nca
+	$(GO) mod init github.com/pederhe/nca
 	$(GO) mod tidy
 
 # Build binary for current platform

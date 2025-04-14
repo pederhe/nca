@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pederhe/nca/core"
+	"github.com/pederhe/nca/internal/core"
 )
 
 // Help text for the command
